@@ -1,0 +1,35 @@
+
+---
+mmdebstrap:
+  packages:
+    - linux-image-current-rockchip-rk3588
+    - linux-dtb-current-rockchip-rk3588
+    - linux-u-boot-orangepi5-max-current
+    - armbian-bsp-cli-orangepi5-max-current
+    - armbian-firmware
+    - u-boot-tools
+    - parted
+
+hooks:
+  chroot: |
+    set -euo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+
+    printf "orangepi5max\n" > /etc/device-id
+    install -d /usr/share/keyrings /etc/apt/sources.list.d /etc/apt/preferences.d /boot
+
+    wget -qO- https://apt.armbian.com/armbian.key | gpg --dearmor >/usr/share/keyrings/armbian.gpg
+    chmod 0644 /usr/share/keyrings/armbian.gpg
+
+    cat >/etc/apt/sources.list.d/armbian.list <<'EOF'
+    deb [signed-by=/usr/share/keyrings/armbian.gpg] http://apt.armbian.com bookworm main bookworm-utils bookworm-desktop
+    EOF
+
+    cat >/etc/apt/preferences.d/99-armbian-kernel.pref <<'EOF'
+    Package: linux-image-*-rockchip-rk3588 linux-dtb-*-rockchip-rk3588 linux-u-boot-orangepi5-max-* armbian-bsp-cli-orangepi5-max-* armbian-firmware
+    Pin: origin apt.armbian.com
+    Pin-Priority: 1001
+    EOF
+
+    apt-get update
+    apt-get install -y linux-image-current-rockchip-rk3588 linux-dtb-current-rockchip-rk3588 linux-u-boot-orangepi5-max-current armbian-bsp-cli-orangepi5-max-current armbian-firmware u-boot-tools parted

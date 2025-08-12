@@ -1,0 +1,19 @@
+
+---
+mmdebstrap:
+  suite: bookworm
+  mode: unshare
+  architectures:
+    - arm64
+  components:
+    - main
+    - contrib
+    - non-free
+    - non-free-firmware
+  mirrors:
+    - http://deb.debian.org/debian
+  packages:
+    - ca-certificates
+    - sudo
+    - tzdata
+    - locales

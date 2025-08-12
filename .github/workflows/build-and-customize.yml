@@ -1,0 +1,93 @@
+name: Build & Customize (Klipper Suite)
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: "Device key (rpi64 or orangepi5max)"
+        required: true
+        default: "rpi64"
+      board:
+        description: "OPi board hint (orangepi5 | orangepi5-plus | orangepi5-max). Optional; auto-detect if empty."
+        required: false
+      ks_user:
+        description: "Username to create/use inside the image (fallback: pi)"
+        required: false
+      kernel_console:
+        description: "Kernel console args (OPi only). Example: 'console=ttyS2,1500000 console=tty1'"
+        required: false
+      extra_append:
+        description: "Extra kernel args to append (OPi + Pi). Example: 'loglevel=3 nowatchdog'"
+        required: false
+      arg_strategy:
+        description: "How to merge kernel args (append|replace). Default: append"
+        required: false
+        default: "append"
+
+jobs:
+  build-and-customize:
+    runs-on: ubuntu-latest
+    env:
+      DEVICE: ${{ github.event.inputs.device }}
+      KS_USER: ${{ github.event.inputs.ks_user }}
+      BOARD: ${{ github.event.inputs.board }}
+      KERNEL_CONSOLE: ${{ github.event.inputs.kernel_console }}
+      EXTRA_APPEND: ${{ github.event.inputs.extra_append }}
+      ARG_STRATEGY: ${{ github.event.inputs.arg_strategy }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install host deps
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y mmdebstrap qemu-user-static binfmt-support podman wget gpg curl rsync unzip                                   parted dosfstools util-linux e2fsprogs
+          sudo update-binfmts --enable qemu-aarch64 || true
+
+      - name: Build base rootfs (${DEVICE})
+        run: |
+          set -euxo pipefail
+          bash scripts/build-device.sh
+
+      - name: Assemble base image (RPi64)
+        if: env.DEVICE == 'rpi64'
+        env:
+          EXTRA_APPEND: ${{ github.event.inputs.extra_append }}
+          ARG_STRATEGY: ${{ github.event.inputs.arg_strategy }}
+        run: |
+          set -euxo pipefail
+          echo "ARG_STRATEGY: ${ARG_STRATEGY:-append}"
+          echo "EXTRA_APPEND: ${EXTRA_APPEND:-<none>}"
+          bash scripts/make-img-rpi.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
+
+      - name: Assemble base image (Orange Pi 5 family)
+        if: env.DEVICE == 'orangepi5max'
+        env:
+          BOARD: ${{ github.event.inputs.board }}
+          KERNEL_CONSOLE: ${{ github.event.inputs.kernel_console }}
+          EXTRA_APPEND: ${{ github.event.inputs.extra_append }}
+          ARG_STRATEGY: ${{ github.event.inputs.arg_strategy }}
+        run: |
+          set -euxo pipefail
+          echo "BOARD: ${BOARD:-<auto-detect>}"
+          echo "ARG_STRATEGY: ${ARG_STRATEGY:-append}"
+          echo "KERNEL_CONSOLE: ${KERNEL_CONSOLE:-<default>}"
+          echo "EXTRA_APPEND: ${EXTRA_APPEND:-<none>}"
+          bash scripts/make-img-orangepi5max.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
+
+      - name: Customize with CustoPiZer (Klipper Suite)
+        env:
+          KS_USER: ${{ github.event.inputs.ks_user }}
+        uses: docker://ghcr.io/octoprint/custopizer:latest
+        with:
+          args: >-
+            --image build/input-${{ env.DEVICE }}.img
+            --customizations ./custopizer/custom.d
+            --out build/output-${{ env.DEVICE }}.img
+
+      - name: Upload customized image
+        uses: actions/upload-artifact@v4
+        with:
+          name: klipper-suite-${{ env.DEVICE }}
+          path: build/output-${{ env.DEVICE }}.img

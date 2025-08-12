@@ -1,0 +1,34 @@
+
+name: Build multi-device base
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        device: [rpi64, orangepi5max]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Install deps (mmdebstrap, qemu, binfmt, podman)
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y mmdebstrap qemu-user-static binfmt-support podman wget gpg curl
+          sudo update-binfmts --enable qemu-aarch64 || true
+      - name: Build ${{ matrix.device }}
+        env:
+          DEVICE: ${{ matrix.device }}
+        run: bash scripts/build-device.sh
+      - name: Upload base rootfs tarball
+        run: |
+          set -euxo pipefail
+          tar -C out/${{ matrix.device }}-bookworm-arm64 -czf out/${{ matrix.device }}-rootfs.tar.gz rootfs
+      - name: Artifact (rootfs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-rootfs-${{ matrix.device }}
+          path: out/${{ matrix.device }}-rootfs.tar.gz

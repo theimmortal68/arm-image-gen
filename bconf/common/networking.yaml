@@ -1,0 +1,24 @@
+
+---
+mmdebstrap:
+  packages:
+    - network-manager
+
+hooks:
+  chroot: |
+    set -euo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+
+    if systemctl list-unit-files | grep -q '^systemd-networkd.service'; then
+      systemctl disable systemd-networkd || true
+      systemctl mask systemd-networkd || true
+    fi
+    if command -v netplan >/dev/null 2>&1; then
+      systemctl disable netplan-*.service || true
+    fi
+
+    install -d /etc/NetworkManager/conf.d
+    cat >/etc/NetworkManager/conf.d/10-default-wifi-powersave.conf <<'EOF'
+    [connection]
+    wifi.powersave = 2
+    EOF

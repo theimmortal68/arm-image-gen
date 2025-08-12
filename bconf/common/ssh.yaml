@@ -1,0 +1,13 @@
+
+---
+mmdebstrap:
+  packages:
+    - openssh-server
+
+hooks:
+  chroot: |
+    set -euo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+
+    sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config || true
+    sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
