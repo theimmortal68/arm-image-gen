@@ -11,7 +11,7 @@ mmdebstrap:
 
   customize-hooks:
     - |
-      set -euo pipefail
+      set -eu
       export DEBIAN_FRONTEND=noninteractive
 
       printf "orangepi5max\n" > "$1/etc/device-id"
