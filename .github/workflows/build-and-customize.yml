@@ -1,6 +1,13 @@
 name: Build & Customize (Klipper Suite)
 
 on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'bconf/**'
+      - 'devices/**'
+      - 'scripts/**'
+      - '.github/workflows/build-and-customize.yml'
   workflow_dispatch:
     inputs:
       device:
@@ -23,6 +30,10 @@ on:
         description: "How to merge kernel args (append|replace). Default: append"
         required: false
         default: "append"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-customize:
