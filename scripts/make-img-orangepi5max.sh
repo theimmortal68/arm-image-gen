@@ -39,7 +39,12 @@ BOARD="${BOARD:-orangepi5-max}"
 echo "[make-img-opi5] Board = ${BOARD}"
 
 # -------------------- Image layout --------------------
-ROOT_KB=$(du -s -k "$ROOTFS" | awk '{print $1}')
+# after
+ROOT_KB=$(sudo du -sk "$ROOTFS" 2>/dev/null | awk '{print $1}')
+if ! [[ "$ROOT_KB" =~ ^[0-9]+$ ]]; then
+  echo "[make-img-opi5] WARN: du size detection failed; using 800000 KB fallback"
+  ROOT_KB=800000
+fi
 IMG_MB=$(( (ROOT_KB*12/10)/1024 + 512 ))
 echo "[make-img-opi5] Creating image ${IMG} (~${IMG_MB}MB)"
 truncate -s "${IMG_MB}M" "$IMG"
