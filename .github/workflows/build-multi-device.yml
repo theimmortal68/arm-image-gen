@@ -13,11 +13,11 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-      - name: Install deps (mmdebstrap, qemu, binfmt, podman)
+      - name: Install deps (bdebstrap, mmdebstrap, qemu, binfmt, podman)
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y mmdebstrap qemu-user-static binfmt-support podman wget gpg curl
+          sudo apt-get install -y bdebstrap mmdebstrap qemu-user-static binfmt-support podman wget gpg curl
           sudo update-binfmts --enable qemu-aarch64 || true
       - name: Build ${{ matrix.device }}
         env:
