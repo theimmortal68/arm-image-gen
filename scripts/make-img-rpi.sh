@@ -53,7 +53,9 @@ sudo rsync -aHAX --info=progress2 "$ROOTFS"/ "$ROOTMNT"/
 
 sudo mount "${LOOP}p1" "$BOOTMNT"
 if [ -d "$ROOTMNT/boot/firmware" ]; then
-  sudo rsync -aHAX "$ROOTMNT/boot/firmware"/ "$BOOTMNT"/
+  # FAT32 doesn't support chown/perms; avoid -a
+  sudo rsync -rltD --delete --no-owner --no-group --no-perms \
+    "$ROOTMNT/boot/firmware"/ "$BOOTMNT"/
 fi
 
 # Merge EXTRA_APPEND into cmdline.txt (idempotent; strategy-controlled)
