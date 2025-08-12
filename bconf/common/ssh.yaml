@@ -1,13 +1,13 @@
-
 ---
 mmdebstrap:
   packages:
     - openssh-server
 
-hooks:
-  chroot: |
-    set -euo pipefail
-    export DEBIAN_FRONTEND=noninteractive
-
-    sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config || true
-    sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+  customize-hooks:
+    - |
+      set -euo pipefail
+      # Harden root login and allow password auth by default (adjust later as needed)
+      if [ -f "$1/etc/ssh/sshd_config" ]; then
+        sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' "$1/etc/ssh/sshd_config" || true
+        sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' "$1/etc/ssh/sshd_config" || true
+      fi

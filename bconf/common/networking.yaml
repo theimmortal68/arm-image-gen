@@ -1,24 +1,27 @@
-
 ---
 mmdebstrap:
   packages:
     - network-manager
 
-hooks:
-  chroot: |
-    set -euo pipefail
-    export DEBIAN_FRONTEND=noninteractive
+  customize-hooks:
+    - |
+      set -euo pipefail
 
-    if systemctl list-unit-files | grep -q '^systemd-networkd.service'; then
-      systemctl disable systemd-networkd || true
-      systemctl mask systemd-networkd || true
-    fi
-    if command -v netplan >/dev/null 2>&1; then
-      systemctl disable netplan-*.service || true
-    fi
+      # Prefer NetworkManager; tone down Wi-Fi power save
+      install -d "$1/etc/NetworkManager/conf.d"
+      cat >"$1/etc/NetworkManager/conf.d/10-default-wifi-powersave.conf" <<'EOF'
+      [connection]
+      wifi.powersave = 2
+      EOF
 
-    install -d /etc/NetworkManager/conf.d
-    cat >/etc/NetworkManager/conf.d/10-default-wifi-powersave.conf <<'EOF'
-    [connection]
-    wifi.powersave = 2
-    EOF
+      # Try to disable other network stacks if present (safe no-ops if not installed)
+      chroot "$1" bash -euo pipefail <<'EOSH'
+      set -euo pipefail
+      if systemctl list-unit-files | grep -q '^systemd-networkd.service'; then
+        systemctl disable systemd-networkd || true
+        systemctl mask systemd-networkd || true
+      fi
+      if command -v netplan >/dev/null 2>&1; then
+        systemctl disable 'netplan-*' || true
+      fi
+      EOSH
