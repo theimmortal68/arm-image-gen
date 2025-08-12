@@ -47,14 +47,33 @@ if ((${#VALID[@]}==0)); then
   exit 2
 fi
 
+# ... after VALID[] is built ...
+
 echo "==> Building ${DEVICE} with configs:"
 printf '   - %s\n' "${VALID[@]}"
 
 OPTS=()
 for c in "${VALID[@]}"; do OPTS+=(-c "$c"); done
-podman unshare -- bdebstrap "${OPTS[@]}" --name "$OUTDIR"
+
+# Use the host Debian keyring so apt inside mmdebstrap can verify Debian mirrors
+KEYRING="/usr/share/keyrings/debian-archive-keyring.gpg"
+[ -f "$KEYRING" ] || { echo "ERROR: Missing $KEYRING (install debian-archive-keyring)"; exit 2; }
+
+# Tell bdebstrap to emit a DIRECTORY rootfs at out/.../rootfs
+TARGET_DIR="$OUTDIR/rootfs"
+mkdir -p "$TARGET_DIR"
+
+podman unshare -- bdebstrap \
+  --keyring "$KEYRING" \
+  --format directory \
+  --target "$TARGET_DIR" \
+  "${OPTS[@]}" \
+  --name "$OUTDIR"
+
+# Fail-fast if the directory didn’t materialize
+[ -f "$TARGET_DIR/etc/os-release" ] || { echo "ERROR: rootfs not created at $TARGET_DIR"; exit 2; }
 
 echo "==> Host post-processing"
-bash scripts/host-post.sh "$OUTDIR/rootfs"
+bash scripts/host-post.sh "$TARGET_DIR"
 
-echo "==> Done. Rootfs at: $OUTDIR/rootfs"
+echo "==> Done. Rootfs at: $TARGET_DIR"
