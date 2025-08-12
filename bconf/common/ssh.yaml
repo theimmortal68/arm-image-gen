@@ -5,7 +5,7 @@ mmdebstrap:
 
   customize-hooks:
     - |
-      set -euo pipefail
+      set -eu
       # Harden root login and allow password auth by default (adjust later as needed)
       if [ -f "$1/etc/ssh/sshd_config" ]; then
         sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' "$1/etc/ssh/sshd_config" || true
