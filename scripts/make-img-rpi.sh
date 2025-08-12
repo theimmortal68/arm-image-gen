@@ -25,7 +25,15 @@ if ! [[ "$ROOT_KB" =~ ^[0-9]+$ ]]; then
 fi
 IMG_MB=$(( (ROOT_KB*12/10)/1024 + BOOT_MB + 512 ))
 
-echo "[make-img-rpi] Creating image ${IMG} (~${IMG_MB}MB)"
+# Build dir must be writable by the current user
+BUILDDIR="$(dirname "$IMG")"
+mkdir -p "$BUILDDIR"
+# If someone created it with sudo earlier, take ownership back
+if [ ! -w "$BUILDDIR" ]; then
+  sudo chown "$(id -u)":"$(id -g)" "$BUILDDIR"
+fi
+
+echo "[make-img-$(basename "$0" .sh)] Creating image ${IMG} (~${IMG_MB}MB)"
 truncate -s "${IMG_MB}M" "$IMG"
 
 parted -s "$IMG" mklabel msdos
