@@ -12,7 +12,7 @@ su - "${USER}" -c "${HOME_DIR}/klippy-env/bin/pip install -U pip wheel"
 su - "${USER}" -c "${HOME_DIR}/klippy-env/bin/pip install -r ${HOME_DIR}/klipper/scripts/klippy-requirements.txt"
 
 if [ ! -f "${HOME_DIR}/printer.cfg" ]; then
-  su - "${USER}" -c "cp ${HOME_DIR}/klipper/config/printer-anycubic-kobra-go-2022.cfg ${HOME_DIR}/printer.cfg || touch ${HOME_DIR}/printer.cfg"
+  su - "${USER}" -c "cp ${HOME_DIR}/klipper/config/example-corexy.cfg ${HOME_DIR}/printer.cfg || touch ${HOME_DIR}/printer.cfg"
 fi
 
 cat >/etc/systemd/system/klipper.service <<EOF
