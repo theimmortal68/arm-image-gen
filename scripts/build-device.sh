@@ -1,33 +1,45 @@
-
 #!/usr/bin/env bash
 set -euo pipefail
 DEVICE="${DEVICE:-rpi64}"
 OUTDIR="${OUTDIR:-out/${DEVICE}-bookworm-arm64}"
-LAYERS="devices/${DEVICE}/layers.yaml"
+LAYERS_FILE="devices/${DEVICE}/layers.yaml"
 
 rm -rf "$OUTDIR"
 mkdir -p "$OUTDIR"
 
 sudo apt-get update
-sudo apt-get install -y qemu-user-static binfmt-support mmdebstrap podman wget gpg curl
+sudo apt-get install -y qemu-user-static binfmt-support mmdebstrap bdebstrap podman wget gpg curl
 sudo update-binfmts --enable qemu-aarch64 || true
 
-echo "==> Building ${DEVICE} with layers ${LAYERS}"
-LAYERS_FILE="devices/${DEVICE}/layers.yaml"
+# --- extract the layer list safely (ignore '---', only bullets under 'layers:') ---
+mapfile -t CFGS < <(awk '
+  $1=="layers:" { inlist=1; next }
+  inlist && $1 ~ /^-/       { sub(/^- +/, "", $0); print; next }
+  inlist && $1 !~ /^-/      { inlist=0 }
+' "$LAYERS_FILE")
 
-# Extract list items from layers.yaml (lines that start with "- ")
-mapfile -t CFGS < <(sed -n 's/^[[:space:]]*-[[:space:]]*\(.*\)$/\1/p' "$LAYERS_FILE")
-if [ "${#CFGS[@]}" -eq 0 ]; then
-  echo "No layers found in $LAYERS_FILE"; exit 2
-fi
-
-OPTS=()
+# Clean up each entry: strip trailing comments, trim, drop blanks
+VALID=()
 for c in "${CFGS[@]}"; do
-  OPTS+=(-c "$c")
+  c="${c%%#*}"                 # strip inline comment
+  c="$(printf "%s" "$c" | xargs)"  # trim
+  [[ -z "$c" ]] && continue
+  [[ ! -f "$c" ]] && { echo "ERROR: layer file not found: $c"; exit 2; }
+  VALID+=("$c")
 done
 
+if ((${#VALID[@]}==0)); then
+  echo "ERROR: no valid layers found in $LAYERS_FILE"
+  exit 2
+fi
+
 echo "==> Building ${DEVICE} with configs:"
-printf '   - %s\n' "${CFGS[@]}"
+printf '   - %s\n' "${VALID[@]}"
+
+OPTS=()
+for c in "${VALID[@]}"; do
+  OPTS+=(-c "$c")
+done
 
 podman unshare -- bdebstrap "${OPTS[@]}" --name "$OUTDIR"
 
