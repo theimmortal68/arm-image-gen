@@ -4,9 +4,6 @@ DEVICE="${DEVICE:-rpi64}"
 OUTDIR="${OUTDIR:-out/${DEVICE}-bookworm-arm64}"
 LAYERS_FILE="devices/${DEVICE}/layers.yaml"
 
-rm -rf "$OUTDIR"
-mkdir -p "$OUTDIR"
-
 sudo apt-get update
 sudo apt-get install -y qemu-user-static binfmt-support mmdebstrap bdebstrap podman wget gpg curl
 sudo update-binfmts --enable qemu-aarch64 || true
@@ -68,7 +65,8 @@ podman unshare -- bdebstrap \
   --format directory \
   --target "$TARGET_DIR" \
   "${OPTS[@]}" \
-  --name "$OUTDIR"
+  --name "$OUTDIR" \
+  --force
 
 # Fail-fast if the directory didn’t materialize
 [ -f "$TARGET_DIR/etc/os-release" ] || { echo "ERROR: rootfs not created at $TARGET_DIR"; exit 2; }
