@@ -2,11 +2,12 @@ name: Build & Customize (Klipper Suite)
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
     paths:
       - 'bconf/**'
       - 'devices/**'
       - 'scripts/**'
+      - 'custopizer/**'
       - '.github/workflows/build-and-customize.yml'
   workflow_dispatch:
     inputs:
@@ -15,19 +16,19 @@ on:
         required: true
         default: "rpi64"
       board:
-        description: "OPi board hint (orangepi5 | orangepi5-plus | orangepi5-max). Optional; auto-detect if empty."
+        description: "OPi board hint (orangepi5 | orangepi5-plus | orangepi5-max)"
         required: false
       ks_user:
-        description: "Username to create/use inside the image (fallback: pi)"
+        description: "Username in image (fallback: pi)"
         required: false
       kernel_console:
-        description: "Kernel console args (OPi only). Example: 'console=ttyS2,1500000 console=tty1'"
+        description: "Kernel console (OPi only)"
         required: false
       extra_append:
-        description: "Extra kernel args to append (OPi + Pi). Example: 'loglevel=3 nowatchdog'"
+        description: "Extra kernel args (Pi + OPi)"
         required: false
       arg_strategy:
-        description: "How to merge kernel args (append|replace). Default: append"
+        description: "append | replace (kernel args merge)"
         required: false
         default: "append"
 
@@ -55,6 +56,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bdebstrap mmdebstrap debian-archive-keyring qemu-user-static binfmt-support podman wget gpg curl rsync unzip parted dosfstools util-linux e2fsprogs
           sudo update-binfmts --enable qemu-aarch64 || true
+
+      - name: Set defaults for non-dispatch runs
+        run: |
+          echo "DEVICE=${DEVICE:-rpi64}" >> "$GITHUB_ENV"
+          echo "BOARD=${BOARD:-}" >> "$GITHUB_ENV"
+          echo "KS_USER=${KS_USER:-}" >> "$GITHUB_ENV"
+          echo "KERNEL_CONSOLE=${KERNEL_CONSOLE:-}" >> "$GITHUB_ENV"
+          echo "EXTRA_APPEND=${EXTRA_APPEND:-}" >> "$GITHUB_ENV"
+          echo "ARG_STRATEGY=${ARG_STRATEGY:-append}" >> "$GITHUB_ENV"
 
       - name: Build base rootfs (${DEVICE})
         run: |
@@ -88,14 +98,16 @@ jobs:
           bash scripts/make-img-orangepi5max.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
 
       - name: Customize with CustoPiZer (Klipper Suite)
-        env:
-          KS_USER: ${{ github.event.inputs.ks_user }}
-        uses: docker://ghcr.io/octoprint/custopizer:latest
-        with:
-          args: >-
-            --image build/input-${{ env.DEVICE }}.img
-            --customizations ./custopizer/custom.d
-            --out build/output-${{ env.DEVICE }}.img
+        run: |
+          set -euxo pipefail
+          # Map build/ and custom.d into the container; use absolute paths inside
+          docker run --rm \
+            -v "$PWD/build:/work" \
+            -v "$PWD/custopizer/custom.d:/custom.d" \
+            ghcr.io/octoprint/custopizer:latest \
+            --image "/work/input-${DEVICE}.img" \
+            --customizations "/custom.d" \
+            --out "/work/output-${DEVICE}.img"
 
       - name: Upload customized image
         uses: actions/upload-artifact@v4
