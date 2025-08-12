@@ -13,16 +13,24 @@ sudo update-binfmts --enable qemu-aarch64 || true
 
 # --- extract the layer list safely (ignore '---', only bullets under 'layers:') ---
 mapfile -t CFGS < <(awk '
-  $1=="layers:" { inlist=1; next }
-  inlist && $1 ~ /^-/       { sub(/^- +/, "", $0); print; next }
-  inlist && $1 !~ /^-/      { inlist=0 }
+  /^[[:space:]]*layers:/ { inlist=1; next }
+  inlist && /^[[:space:]]*-/ {
+    line=$0
+    sub(/^[[:space:]]*-[[:space:]]*/, "", line)   # remove leading "- "
+    print line
+    next
+  }
+  inlist && !/^[[:space:]]*-/ { inlist=0 }
 ' "$LAYERS_FILE")
 
-# Clean up each entry: strip trailing comments, trim, drop blanks
+# Clean each entry: strip inline comments, quotes, whitespace; then validate
 VALID=()
 for c in "${CFGS[@]}"; do
-  c="${c%%#*}"                 # strip inline comment
-  c="$(printf "%s" "$c" | xargs)"  # trim
+  c="${c%%#*}"                        # strip inline comment
+  c="$(printf "%s" "$c" | tr -d '\r')" # guard against CRLF
+  c="$(printf "%s" "$c" | xargs)"      # trim
+  c="${c%\"}"; c="${c#\"}"             # remove "quotes"
+  c="${c%\'}"; c="${c#\'}"             # remove 'quotes'
   [[ -z "$c" ]] && continue
   [[ ! -f "$c" ]] && { echo "ERROR: layer file not found: $c"; exit 2; }
   VALID+=("$c")
@@ -37,10 +45,7 @@ echo "==> Building ${DEVICE} with configs:"
 printf '   - %s\n' "${VALID[@]}"
 
 OPTS=()
-for c in "${VALID[@]}"; do
-  OPTS+=(-c "$c")
-done
-
+for c in "${VALID[@]}"; do OPTS+=(-c "$c"); done
 podman unshare -- bdebstrap "${OPTS[@]}" --name "$OUTDIR"
 
 echo "==> Host post-processing"
