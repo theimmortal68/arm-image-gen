@@ -1,11 +1,11 @@
 ---
 mmdebstrap:
   packages:
-    - firmware-brcm80211   # Wi-Fi/BT firmware from Debian non-free-firmware
+    - firmware-brcm80211
 
   customize-hooks:
     - |
-      set -euo pipefail
+      set -eu
       export DEBIAN_FRONTEND=noninteractive
 
       printf "rpi64\n" > "$1/etc/device-id"
