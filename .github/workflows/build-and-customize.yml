@@ -53,7 +53,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y bdebstrap mmdebstrap qemu-user-static binfmt-support podman wget gpg curl rsync unzip parted dosfstools util-linux e2fsprogs
+          sudo apt-get install -y bdebstrap mmdebstrap debian-archive-keyring qemu-user-static binfmt-support podman wget gpg curl rsync unzip parted dosfstools util-linux e2fsprogs
           sudo update-binfmts --enable qemu-aarch64 || true
 
       - name: Build base rootfs (${DEVICE})

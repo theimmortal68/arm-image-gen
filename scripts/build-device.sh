@@ -11,6 +11,12 @@ sudo apt-get update
 sudo apt-get install -y qemu-user-static binfmt-support mmdebstrap bdebstrap podman wget gpg curl
 sudo update-binfmts --enable qemu-aarch64 || true
 
+# after deps are installed
+KEYRING="/usr/share/keyrings/debian-archive-keyring.gpg"
+if [ ! -f "$KEYRING" ]; then
+  echo "ERROR: Debian keyring not found at $KEYRING"; exit 2
+fi
+
 # --- extract the layer list safely (ignore '---', only bullets under 'layers:') ---
 mapfile -t CFGS < <(awk '
   /^[[:space:]]*layers:/ { inlist=1; next }
