@@ -5,7 +5,7 @@ mmdebstrap:
 
   customize-hooks:
     - |
-      set -euo pipefail
+      set -eu
 
       # Prefer NetworkManager; tone down Wi-Fi power save
       install -d "$1/etc/NetworkManager/conf.d"
@@ -14,7 +14,7 @@ mmdebstrap:
       wifi.powersave = 2
       EOF
 
-      # Try to disable other network stacks if present (safe no-ops if not installed)
+      # Disable other network stacks if present (safe no-ops otherwise)
       chroot "$1" bash -euo pipefail <<'EOSH'
       set -euo pipefail
       if systemctl list-unit-files | grep -q '^systemd-networkd.service'; then
