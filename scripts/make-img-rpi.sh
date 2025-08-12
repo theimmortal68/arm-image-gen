@@ -8,6 +8,11 @@ set -euo pipefail
 ROOTFS="${1:?usage: $0 /path/to/rootfs}"
 IMG="${2:-build/input-rpi64.img}"
 BOOT_MB="${BOOT_MB:-512}"
+if [ ! -d "$ROOTFS" ]; then
+  echo "[make-img-rpi] ERROR: rootfs not found at: $ROOTFS"
+  echo "Build it first: DEVICE=rpi64 bash scripts/build-device.sh"
+  exit 1
+fi
 ARG_STRATEGY="${ARG_STRATEGY:-append}"  # append | replace
 
 sudo mkdir -p "$(dirname "$IMG")"
