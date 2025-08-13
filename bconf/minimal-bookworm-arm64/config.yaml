@@ -15,6 +15,4 @@ mmdebstrap:
     - tzdata
     - locales
     - debian-archive-keyring
-    # required for working DNS inside chroot:
-    - libnss-dns
     - netbase
