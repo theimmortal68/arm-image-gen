@@ -42,7 +42,7 @@ jobs:
           # OS-level tools you need regardless
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qemu-user-static binfmt-support \
+            qemu-user-static binfmt-support pandoc \
             ca-certificates curl wget jq git unzip rsync \
             parted dosfstools e2fsprogs kpartx xz-utils \
             util-linux udev mount kmod file perl python3-pip
