@@ -1,16 +1,10 @@
----
+# bconf/common/base-packages-ubuntu.yaml
 mmdebstrap:
-  suite: bookworm
-  components:
-    - main
-    - contrib
-    - non-free
-    - non-free-firmware
-  architectures:
-    - arm64
+  suite: noble        # or jammy if you prefer
+  components: [ main, universe, multiverse, restricted ]
+  architectures: [ arm64 ]
   variant: apt
   format: directory
-
   packages:
     - ca-certificates
     - curl
@@ -32,24 +26,22 @@ mmdebstrap:
     - libffi-dev
     - libusb-1.0-0-dev
     - libncurses-dev
-    - ubuntu-minimal
-
-  setup-hook:
-    - |
-      set -e
-      install -d "$1/usr/sbin"
-      cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
-      #!/bin/sh
-      exit 101
-      EOS
-      chmod +x "$1/usr/sbin/policy-rc.d"
-
-  customize-hook:
-    - |
-      set -e
-      cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
-      Acquire::ForceIPv4 "true";
-      Acquire::Retries "5";
-      Acquire::http::Timeout "30";
-      Acquire::https::Timeout "30";
-      EOF
+# block services and apt net tuning (same two hooks you used on Debian)
+setup-hook:
+  - |
+    set -e
+    install -d "$1/usr/sbin"
+    cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
+    #!/bin/sh
+    exit 101
+    EOS
+    chmod +x "$1/usr/sbin/policy-rc.d"
+customize-hook:
+  - |
+    set -e
+    cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
+    Acquire::ForceIPv4 "true";
+    Acquire::Retries "5";
+    Acquire::http::Timeout "30";
+    Acquire::https::Timeout "30";
+    EOF
