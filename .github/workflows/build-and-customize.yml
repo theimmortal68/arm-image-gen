@@ -99,20 +99,23 @@ jobs:
 
       - name: Prepare CustoPiZer workspace
         run: |
-          set -euxo pipefail
+          set -eux
           mkdir -p build/workspace
           cp -f "build/input-${DEVICE}.img" build/workspace/input.img
-          # make sure scripts are executable
           chmod -R +x custopizer/custom.d
+          cat > build/config.local <<'EOF'
+          EDITBASE_ARCH=arm64
+          EDITBASE_IMAGE_ENLARGEROOT=8000
+          # Optional: final resize to +20% after customization
+          EDITBASE_IMAGE_RESIZEROOT=20
+          EOF
 
       - name: Run CustoPiZer
         uses: OctoPrint/CustoPiZer@main
         with:
           workspace: "${{ github.workspace }}/build/workspace"
           scripts:   "${{ github.workspace }}/custopizer/custom.d"
-          # optional:
-          # config:   "${{ github.workspace }}/config.local"
-          # environment: '{ "OCTOPRINT_VERSION": "1.10.2" }'
+          config:    "${{ github.workspace }}/build/config.local"
 
       - name: Collect customized image
         run: |
