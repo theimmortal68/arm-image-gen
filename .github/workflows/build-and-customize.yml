@@ -112,6 +112,8 @@ jobs:
           EDITBASE_IMAGE_ENLARGEROOT=8000
           EDITBASE_IMAGE_RESIZEROOT=20
           EDITBASE_INSTALL_POLICYKIT=0
+          EDITBASE_MOUNT_PROC=1
+          EDITBASE_MOUNT_SYS=1
           EOF
 
       - name: Run CustoPiZer via docker (with DNS)
