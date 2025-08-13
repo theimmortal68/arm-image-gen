@@ -32,30 +32,32 @@ WEBROOT="$HOME_DIR/mainsail"
 TMP="/tmp/mainsail.zip"
 TMPDIR="/tmp/_mainsail_zip"
 
-# Clean any previous temp dir
 rm -rf "$TMPDIR" && mkdir -p "$TMPDIR"
 
-# Always pull the canonical asset name used by releases:
+# Official prebuilt asset
 URL="https://github.com/mainsail-crew/mainsail/releases/latest/download/mainsail.zip"
-echo_green "[mainsail] downloading latest release asset → $URL"
+echo_green "[mainsail] downloading → $URL"
 retry 4 2 wget -O "$TMP" "$URL"
 
-# Unpack, handling both flat and nested layouts
 unzip -o "$TMP" -d "$TMPDIR"
+
+# Handle both layouts: files directly in ZIP root or nested in 'mainsail/'
 SRC="$TMPDIR"
 [ -d "$TMPDIR/mainsail" ] && SRC="$TMPDIR/mainsail"
 
-# Install to webroot
 install -d "$WEBROOT"
-rsync -a --delete "$SRC/""$WEBROOT/"
+
+# ✅ Correct: source and destination are separate args
+rsync -a --delete "$SRC/" "$WEBROOT/"
+
 chown -R "$KS_USER:$KS_USER" "$WEBROOT"
 
-# Health checks (fail if broken)
+# Health checks
 test -s "$WEBROOT/index.html" || { echo_red "[mainsail] index.html missing"; exit 1; }
 grep -Eo 'src="/assets/.+\.js' "$WEBROOT/index.html" >/dev/null || {
   echo_red "[mainsail] no JS bundle referenced in index.html"; exit 1; }
 
-# Nginx site (idempotent)
+# Nginx site
 cat >/etc/nginx/sites-available/mainsail <<EOF
 server {
     listen 80;
@@ -84,11 +86,12 @@ ln -sf /etc/nginx/sites-available/mainsail /etc/nginx/sites-enabled/mainsail
 systemctl_if_exists daemon-reload || true
 systemctl_if_exists enable nginx || true
 
-# Moonraker Update Manager: ensure 'type: web' entry (remove any old git_repo block first)
+# Moonraker Update Manager: type=web
 MOON_CFG="$HOME_DIR/printer_data/config/moonraker.conf"
 install -d "$(dirname "$MOON_CFG")"
 touch "$MOON_CFG"; chown "$KS_USER:$KS_USER" "$MOON_CFG"
 
+# Remove any prior mainsail block (git/web) then add web entry
 if grep -q "^\[update_manager mainsail\]" "$MOON_CFG"; then
   awk '
     BEGIN{skip=0}
@@ -107,4 +110,4 @@ path: ~/mainsail
 EOF
 chown "$KS_USER:$KS_USER" "$MOON_CFG"
 
-# Optional: remove leftover git source tree to
+echo_green "[mainsail] installed from release ZIP → $WEBROOT"
