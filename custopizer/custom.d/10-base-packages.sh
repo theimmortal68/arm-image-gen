@@ -5,6 +5,17 @@ export LC_ALL=C
 source /common.sh
 install_cleanup_trap
 
+# retry polyfill: usage → retry <attempts> <delay> <cmd...>
+type retry >/dev/null 2>&1 || retry() {
+  local tries="$1"; local delay="$2"; shift 2
+  local n=0
+  until "$@"; do
+    n=$((n+1))
+    [ "$n" -ge "$tries" ] && return 1
+    sleep "$delay"
+  done
+}
+
 KS_USER="${KS_USER:-pi}"
 
 retry 4 2 apt-get update
