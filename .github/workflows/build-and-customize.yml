@@ -1,4 +1,4 @@
-name: Build & Customize (Klipper Suite)
+name: Build & Customize (Klipper Suite) [docker-run]
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
       - 'devices/**'
       - 'scripts/**'
       - 'custopizer/**'
-      - '.github/workflows/build-and-customize.yml'
+      - '.github/workflows/build-and-customize-docker.yml'
   workflow_dispatch:
     inputs:
       device:
@@ -52,9 +52,12 @@ jobs:
 
       - name: Install host deps
         run: |
-          set -euxo pipefail
+          set -eux
           sudo apt-get update
-          sudo apt-get install -y bdebstrap mmdebstrap debian-archive-keyring qemu-user-static binfmt-support podman wget gpg curl rsync unzip parted dosfstools util-linux e2fsprogs
+          sudo apt-get install -y \
+            bdebstrap mmdebstrap debian-archive-keyring \
+            qemu-user-static binfmt-support podman wget gpg curl rsync unzip \
+            parted dosfstools util-linux e2fsprogs
           sudo update-binfmts --enable qemu-aarch64 || true
 
       - name: Set defaults for non-dispatch runs
@@ -66,65 +69,66 @@ jobs:
           echo "EXTRA_APPEND=${EXTRA_APPEND:-}" >> "$GITHUB_ENV"
           echo "ARG_STRATEGY=${ARG_STRATEGY:-append}" >> "$GITHUB_ENV"
 
-      - name: Build base rootfs (${DEVICE})
+      - name: Build base rootfs (${{ env.DEVICE }})
         run: |
-          set -euxo pipefail
+          set -eux
           bash scripts/build-device.sh
 
       - name: Assemble base image (RPi64)
         if: env.DEVICE == 'rpi64'
-        env:
-          EXTRA_APPEND: ${{ github.event.inputs.extra_append }}
-          ARG_STRATEGY: ${{ github.event.inputs.arg_strategy }}
         run: |
-          set -euxo pipefail
-          echo "ARG_STRATEGY: ${ARG_STRATEGY:-append}"
+          set -eux
           echo "EXTRA_APPEND: ${EXTRA_APPEND:-<none>}"
           bash scripts/make-img-rpi.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
 
       - name: Assemble base image (Orange Pi 5 family)
         if: env.DEVICE == 'orangepi5max'
         env:
-          BOARD: ${{ github.event.inputs.board }}
-          KERNEL_CONSOLE: ${{ github.event.inputs.kernel_console }}
-          EXTRA_APPEND: ${{ github.event.inputs.extra_append }}
-          ARG_STRATEGY: ${{ github.event.inputs.arg_strategy }}
+          BOARD: ${{ env.BOARD }}
+          KERNEL_CONSOLE: ${{ env.KERNEL_CONSOLE }}
+          EXTRA_APPEND: ${{ env.EXTRA_APPEND }}
+          ARG_STRATEGY: ${{ env.ARG_STRATEGY }}
         run: |
-          set -euxo pipefail
+          set -eux
           echo "BOARD: ${BOARD:-<auto-detect>}"
-          echo "ARG_STRATEGY: ${ARG_STRATEGY:-append}"
           echo "KERNEL_CONSOLE: ${KERNEL_CONSOLE:-<default>}"
           echo "EXTRA_APPEND: ${EXTRA_APPEND:-<none>}"
+          echo "ARG_STRATEGY: ${ARG_STRATEGY:-append}"
           bash scripts/make-img-orangepi5max.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
+
+      - name: Check input image exists
+        run: |
+          test -s "build/input-${DEVICE}.img" || { echo "Missing build/input-${DEVICE}.img"; exit 1; }
 
       - name: Prepare CustoPiZer workspace
         run: |
           set -eux
           mkdir -p build/workspace
           cp -f "build/input-${DEVICE}.img" build/workspace/input.img
-          chmod -R +x custopizer/custom.d
+          rsync -a custopizer/custom.d/ build/workspace/scripts/
+          chmod -R +x build/workspace/scripts
           cat > build/config.local <<'EOF'
           EDITBASE_ARCH=arm64
           EDITBASE_IMAGE_ENLARGEROOT=8000
-          # Optional: final resize to +20% after customization
           EDITBASE_IMAGE_RESIZEROOT=20
           EDITBASE_INSTALL_POLICYKIT=0
           EOF
 
-      - name: Run CustoPiZer
-        uses: OctoPrint/CustoPiZer@main
-        with:
-          workspace: "${{ github.workspace }}/build/workspace"
-          scripts:   "${{ github.workspace }}/custopizer/custom.d"
-          config:    "${{ github.workspace }}/build/config.local"
+      - name: Run CustoPiZer via docker (with DNS)
+        run: |
+          set -eux
+          docker run --rm --privileged --dns 8.8.8.8 \
+            -v "$PWD/build/workspace:/CustoPiZer/workspace" \
+            -v "$PWD/build/config.local:/CustoPiZer/config.local" \
+            ghcr.io/octoprint/custopizer:latest
 
       - name: Collect customized image
         run: |
-          set -euxo pipefail
+          set -eux
           test -s build/workspace/output.img
           mv -f build/workspace/output.img "build/output-${DEVICE}.img"
 
-      - name: Upload customized image
+      - name: Upload customized image artifact
         uses: actions/upload-artifact@v4
         with:
           name: klipper-suite-${{ env.DEVICE }}
