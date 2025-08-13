@@ -1,8 +1,6 @@
-
----
 layers:
   - bconf/minimal-bookworm-arm64/config.yaml
+  - bconf/common/base-packages-debian.yaml
   - bconf/rpi64/firmware.yaml
   - bconf/common/networking.yaml
   - bconf/common/ssh.yaml
-  # All Klipper stack is applied later via CustoPiZer on the built image

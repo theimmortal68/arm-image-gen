@@ -126,14 +126,19 @@ jobs:
             ghcr.io/octoprint/custopizer:latest
           mv -f build/workspace/output.img "build/output-${DEVICE}.img"
     
-      - name: Collect customized image
+      - name: Collect output image
+        shell: bash
         run: |
           set -eux
-          test -s build/workspace/output.img
-          mv -f build/workspace/output.img "build/output-${DEVICE}.img"
-
-      - name: Upload customized image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: klipper-suite-${{ env.DEVICE }}
-          path: build/output-${{ env.DEVICE }}.img
+          OUT="build/output-${DEVICE}.img"
+          if [ -s "build/workspace/output.img" ]; then
+            mv -f build/workspace/output.img "$OUT"
+          elif [ -s "$OUT" ]; then
+            echo "Output already at $OUT"
+          else
+            echo "No output image found" >&2
+            echo "::group::build dir listing"
+            ls -lR build || true
+            echo "::endgroup::"
+            exit 1
+          fi
