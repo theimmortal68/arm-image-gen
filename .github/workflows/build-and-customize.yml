@@ -74,6 +74,11 @@ jobs:
           set -eux
           bash scripts/build-device.sh
 
+      - name: Verify base tools present
+        run: |
+          set -eux
+          sudo chroot out/rpi64-bookworm-arm64/rootfs bash -lc 'dpkg -s git >/dev/null && echo "git OK"'
+
       - name: Assemble base image (RPi64)
         if: env.DEVICE == 'rpi64'
         run: |
