@@ -77,6 +77,41 @@ if [ -f "$ROOTMNT/usr/bin/sudo" ]; then
   sudo chmod 4755 "$ROOTMNT/usr/bin/sudo"
 fi
 
+# --- PolicyKit shim for Bookworm: install polkitd and mark policykit-1 as installed ---
+# This avoids CustoPiZer failing on 'apt-get install policykit-1'
+sudo chroot "$ROOTMNT" bash -euo pipefail <<'EOSH'
+set -e
+export DEBIAN_FRONTEND=noninteractive
+
+# Make sure we can resolve names inside the chroot if not already fixed externally
+if ! grep -q 'nameserver' /etc/resolv.conf 2>/dev/null; then
+  printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf
+fi
+
+# Install the real daemon (best effort)
+apt-get update || true
+apt-get install -y polkitd || true
+
+# If 'policykit-1' is not in the dpkg database, create a tiny dummy package so APT
+# thinks it's satisfied when CustoPiZer tries to install it.
+if ! dpkg -s policykit-1 >/dev/null 2>&1; then
+  ARCH="$(dpkg --print-architecture)"
+  mkdir -p /tmp/pk1/DEBIAN
+  cat > /tmp/pk1/DEBIAN/control <<EOF
+Package: policykit-1
+Version: 1:9999
+Section: admin
+Priority: optional
+Architecture: ${ARCH}
+Maintainer: local <local@localhost>
+Description: Dummy policykit-1 to satisfy CustoPiZer on Debian Bookworm
+Provides: policykit-1
+EOF
+  dpkg-deb --build /tmp/pk1 /tmp/policykit-1_1%3a9999_${ARCH}.deb
+  dpkg -i /tmp/policykit-1_1%3a9999_${ARCH}.deb
+fi
+EOSH
+
 ROOT_UUID=$(sudo blkid -s UUID -o value "${LOOP}p1")
 sudo tee "$ROOTMNT/etc/fstab" >/dev/null <<EOF
 UUID=${ROOT_UUID}  /  ext4  defaults,noatime  0 1
