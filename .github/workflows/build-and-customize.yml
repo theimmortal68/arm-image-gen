@@ -108,6 +108,7 @@ jobs:
           EDITBASE_IMAGE_ENLARGEROOT=8000
           # Optional: final resize to +20% after customization
           EDITBASE_IMAGE_RESIZEROOT=20
+          EDITBASE_INSTALL_POLICYKIT=0
           EOF
 
       - name: Run CustoPiZer
