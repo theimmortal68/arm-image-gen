@@ -116,7 +116,7 @@ jobs:
           EDITBASE_MOUNT_SYS=1
           EOF
           
-     - name: Run CustoPiZer via docker (with DNS)
+      - name: Run CustoPiZer via docker (with DNS)
         run: |
           set -eux
           docker run --rm --privileged \
