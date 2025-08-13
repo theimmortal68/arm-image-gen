@@ -6,8 +6,7 @@
 set -x
 set -e
 export LC_ALL=C
-source /common.sh
-install_cleanup_trap
+source /common.sh; install_cleanup_trap
 
 # retry polyfill: retry <attempts> <delay> <cmd...>
 type retry >/dev/null 2>&1 || retry() {
