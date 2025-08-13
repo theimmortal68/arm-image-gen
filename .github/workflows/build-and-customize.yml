@@ -35,6 +35,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Robust defaults even if env is missing or empty
+          MM_TAG="${MMDEBSTRAP_TAG:-1.5.7}"
+          BDEB_REF="${BDEBSTRAP_REF:-v0.7.0}"
+
           # OS-level tools you need regardless
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -45,10 +49,10 @@ jobs:
 
           # ---- mmdebstrap from GitLab (clone the exact tag) ----
           rm -rf mmdebstrap-src
-          git clone --depth=1 --branch "${MMDEBSTRAP_TAG}" \
+          git clone --depth=1 --branch "${MM_TAG}" \
             https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src || {
-            echo "Direct clone of tag ${MMDEBSTRAP_TAG} failed, trying with 'v' prefix…"
-            git clone --depth=1 --branch "v${MMDEBSTRAP_TAG}" \
+            echo "Direct clone of tag ${MM_TAG} failed, trying with 'v' prefix…"
+            git clone --depth=1 --branch "v${MM_TAG}" \
               https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src
           }
 
@@ -62,7 +66,7 @@ jobs:
 
           # -------- bdebstrap from upstream GitHub --------
           python3 -m pip install --user --upgrade pip wheel
-          python3 -m pip install --user "git+https://github.com/bdrung/bdebstrap@${BDEBSTRAP_REF}"
+          python3 -m pip install --user "git+https://github.com/bdrung/bdebstrap@${BDEB_REF}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
           # -------- sanity checks --------
