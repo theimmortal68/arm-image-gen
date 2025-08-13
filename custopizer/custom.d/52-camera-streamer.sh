@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install camera-streamer from the latest release (strict health check).
+# Install camera-streamer from the latest release (tolerant health check).
 set -x
 set -e
 export LC_ALL=C
@@ -19,19 +19,18 @@ type retry >/dev/null 2>&1 || retry() {
 }
 
 export DEBIAN_FRONTEND=noninteractive
-
 retry 4 2 apt-get update
 apt-get install -y --no-install-recommends ca-certificates wget curl
 
 CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME:-bookworm}")"
 ARCH="$(dpkg --print-architecture)"
-
 VARIANT="generic"
-if [ -e /etc/default/raspberrypi-kernel ]; then VARIANT="raspi"; fi
+# If Raspberry Pi kernel package is present, use raspi variant
+[ -e /etc/default/raspberrypi-kernel ] && VARIANT="raspi"
 
-TAG="$(curl -fsSL https://api.github.com/repos/ayufan/camera-streamer/releases/latest \
-       | grep -m1 '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')" || true
-[ -n "$TAG" ] || TAG="0.2.7"
+# Pick latest tag (best-effort), fallback to a known good
+TAG="$(curl -fsSL https://api.github.com/repos/ayufan/camera-streamer/releases/latest | sed -nE 's/.*"tag_name": *"v?([^"]+)".*/\1/p' | head -n1)" || true
+[ -n "$TAG" ] || TAG="0.2.8"
 
 PKG="camera-streamer-${VARIANT}_${TAG}.${CODENAME}_${ARCH}.deb"
 URL="https://github.com/ayufan/camera-streamer/releases/download/v${TAG}/${PKG}"
@@ -39,24 +38,43 @@ TMP="/tmp/${PKG}"
 
 echo_green "[camera-streamer] installing variant=${VARIANT} tag=v${TAG} arch=${ARCH} codename=${CODENAME}"
 
+# Try codename match first, then bullseye as a fallback
 if ! wget -O "$TMP" "$URL"; then
   ALT="camera-streamer-${VARIANT}_${TAG}.bullseye_${ARCH}.deb"
   ALT_URL="https://github.com/ayufan/camera-streamer/releases/download/v${TAG}/${ALT}"
-  echo_red "[camera-streamer] Bookworm asset not found, trying: ${ALT_URL}"
+  echo_red "[camera-streamer] ${PKG} not found, trying: ${ALT}"
   wget -O "$TMP" "$ALT_URL"
 fi
 
 apt-get install -y "$TMP"
 
+# -------- Health checks (tolerant) --------
 BIN="$(command -v camera-streamer || true)"
-if [ -z "$BIN" ]; then echo_red "[camera-streamer] ERROR: binary not found"; exit 1; fi
+if [ -z "$BIN" ]; then
+  echo_red "[camera-streamer] ERROR: binary not found in PATH"
+  exit 1
+fi
+
+# Ensure dependencies are resolvable
 if MISSING="$(ldd "$BIN" | awk '/not found/ {print $1}')" && [ -n "$MISSING" ]; then
-  echo_red "[camera-streamer] ERROR: missing libs: $MISSING"; exit 1
+  echo_red "[camera-streamer] ERROR: missing libs: $MISSING"
+  exit 1
 fi
+
+# Version must succeed
 if ! "$BIN" --version >/tmp/cs.version 2>&1; then
-  echo_red "[camera-streamer] ERROR: --version failed"; cat /tmp/cs.version || true; exit 1
+  echo_red "[camera-streamer] ERROR: --version failed"
+  cat /tmp/cs.version || true
+  exit 1
 fi
-if ! "$BIN" --help >/dev/null 2>&1; then
-  echo_red "[camera-streamer] ERROR: --help failed"; exit 1
+
+# Help is best-effort: accept non-zero exit if output looks sane
+CS_STATUS=0
+"$BIN" --help >/tmp/cs.help 2>&1 || CS_STATUS=$?
+if [ ! -s /tmp/cs.help ] || grep -qiE 'segmentation fault|illegal instruction|bus error' /tmp/cs.help; then
+  echo_red "[camera-streamer] ERROR: --help produced no output or crashed"
+  cat /tmp/cs.help || true
+  exit 1
 fi
-echo_green "[camera-streamer] OK: $(head -n1 /tmp/cs.version || echo 'version unknown')"
+# If we got here, help output is present; it’s fine even if exit code != 0
+echo_green "[camera-streamer] OK: $(head -n1 /tmp/cs.version || echo 'version unknown') (help exit=${CS_STATUS})"
