@@ -1,20 +1,20 @@
-
 ---
 mmdebstrap:
   suite: bookworm
-  mode: unshare
-  architectures:
-    - arm64
   components:
     - main
     - contrib
     - non-free
     - non-free-firmware
-  mirrors:
-    - http://deb.debian.org/debian
+  architectures:
+    - arm64
+  variant: minbase
   packages:
     - ca-certificates
     - sudo
     - tzdata
     - locales
     - debian-archive-keyring
+    # required for working DNS inside chroot:
+    - libnss-dns
+    - netbase
