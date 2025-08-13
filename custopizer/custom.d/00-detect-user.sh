@@ -2,9 +2,7 @@
 set -x
 set -e
 export LC_ALL=C
-
-source /common.sh
-install_cleanup_trap
+source /common.sh; install_cleanup_trap
 
 # If KS_USER already provided (e.g. via workflow), keep it.
 if [ -n "${KS_USER:-}" ]; then
