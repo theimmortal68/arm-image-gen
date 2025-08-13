@@ -1,18 +1,7 @@
 ---
 mmdebstrap:
   suite: bookworm
-  components:
-    - main
-    - contrib
-    - non-free
-    - non-free-firmware
-  architectures:
-    - arm64
-  variant: minbase
-  packages:
-    - ca-certificates
-    - sudo
-    - tzdata
-    - locales
-    - debian-archive-keyring
-    - netbase
+  components: [main, contrib, non-free, non-free-firmware]
+  architectures: [arm64]
+  variant: apt
+  format: directory

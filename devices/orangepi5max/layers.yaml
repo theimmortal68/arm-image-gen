@@ -1,7 +1,7 @@
-# devices/orangepi5max/layers.yaml
---
-bconf/minimal-bookworm-arm64/config.yaml
-bconf/common/base-packages-armbian.yaml
-bconf/orangepi5max/armbian.yaml
-bconf/common/networking.yaml
-bconf/common/ssh.yaml
+---
+layers:
+  - bconf/minimal-bookworm-arm64/config.yaml
+  - bconf/common/base-packages-armbian.yaml
+  - bconf/orangepi5max/armbian.yaml
+  - bconf/common/networking.yaml
+  - bconf/common/ssh.yaml

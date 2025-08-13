@@ -4,20 +4,17 @@ set -e
 export LC_ALL=C
 source /common.sh; install_cleanup_trap
 
-# If KS_USER already provided (e.g. via workflow), keep it.
-if [ -n "${KS_USER:-}" ]; then
-  CANDIDATE="$KS_USER"
-else
-  # Try to detect an existing non-system user we could adopt
-  for u in pi ubuntu debian armbian orangepi; do
-    if getent passwd "$u" >/dev/null 2>&1; then
-      CANDIDATE="$u"
-      break
-    fi
-  done
-  CANDIDATE="${CANDIDATE:-pi}"
+# If KS_USER is pre-set, respect it, else detect common users, else fallback to pi
+if [ -f /etc/ks-user.conf ]; then
+  . /etc/ks-user.conf || true
 fi
 
-# Persist for subsequent scripts (env doesn't persist between scripts)
-echo "KS_USER=${CANDIDATE}" >/etc/ks-user.conf
-echo_green "[detect-user] KS_USER=${CANDIDATE} (written to /etc/ks-user.conf)"
+if [ -z "${KS_USER:-}" ]; then
+  for u in pi armbian orangepi ubuntu debian; do
+    if getent passwd "$u" >/dev/null 2>&1; then KS_USER="$u"; break; fi
+  done
+  KS_USER="${KS_USER:-pi}"
+fi
+
+echo "KS_USER=${KS_USER}" >/etc/ks-user.conf
+echo_green "[detect-user] KS_USER=$KS_USER"

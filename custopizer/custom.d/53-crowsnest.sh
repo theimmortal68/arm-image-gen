@@ -1,99 +1,75 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -x
 set -e
 export LC_ALL=C
-source /common.sh; install_cleanup_trapp
-
-KS_USER="${KS_USER:-pi}"
-CN_GIT_URL="https://github.com/mainsail-crew/crowsnest.git"
-CN_DEST="/opt/crowsnest"
-BIN_DST="/usr/local/bin/crowsnest"
-HOME_DIR="$(getent passwd "$KS_USER" | cut -d: -f6 || true)"
-[ -n "$HOME_DIR" ] || { echo_red "User $KS_USER missing"; exit 1; }
-CFG_DIR="$HOME_DIR/printer_data/config"
-LOG_DIR="$HOME_DIR/printer_data/logs"
-
-if ! id -u "$KS_USER" >/dev/null 2>&1; then
-  useradd -m -G sudo,video,plugdev,dialout "$KS_USER"
-fi
-usermod -aG video "$KS_USER" || true
+source /common.sh; install_cleanup_trap
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-is_in_apt git && apt-get install -y --no-install-recommends git || true
-is_in_apt curl && apt-get install -y --no-install-recommends curl || true
-is_in_apt ca-certificates && apt-get install -y --no-install-recommends ca-certificates || true
-is_in_apt crudini && apt-get install -y --no-install-recommends crudini || true
-is_in_apt ffmpeg && apt-get install -y --no-install-recommends ffmpeg || true
-is_in_apt v4l-utils && apt-get install -y --no-install-recommends v4l-utils || true
-is_in_apt rpicam-apps-lite && apt-get install -y --no-install-recommends rpicam-apps-lite || true
-is_in_apt libcamera-apps && apt-get install -y --no-install-recommends libcamera-apps || true
 
-if [ ! -d "$CN_DEST/.git" ]; then
-  mkdir -p "$(dirname "$CN_DEST")"
-  git clone --depth=1 "$CN_GIT_URL" "$CN_DEST"
+# Ensure basic deps (most from base layer; these are belt & suspenders)
+for p in git curl jq v4l-utils ffmpeg ustreamer; do
+  is_in_apt "$p" && ! is_installed "$p" && apt-get update && apt-get install -y --no-install-recommends "$p" || true
+done
+
+# Install Crowsnest from upstream git
+CN_DIR="/opt/crowsnest"
+if [ ! -d "$CN_DIR/.git" ]; then
+  git clone --depth=1 https://github.com/mainsail-crew/crowsnest.git "$CN_DIR"
 else
-  git -C "$CN_DEST" fetch --depth=1 origin || true
-  git -C "$CN_DEST" reset --hard origin/master || true
+  git -C "$CN_DIR" fetch --depth=1 origin || true
+  git -C "$CN_DIR" reset --hard origin/master || true
 fi
-install -Dm0755 "$CN_DEST/crowsnest" "$BIN_DST"
 
-install -d "$CFG_DIR" "$LOG_DIR"
-if [ ! -f "$CFG_DIR/crowsnest.conf" ]; then
-  cat >"$CFG_DIR/crowsnest.conf" <<'EOF'
-[crowsnest]
-log_path: ~/printer_data/logs/crowsnest.log
+# Detect runnable entry
+ENTRY=""
+for cand in "$CN_DIR/crowsnest" "$CN_DIR/crowsnest.sh" "$CN_DIR/crowsnest.py"; do
+  if [ -f "$cand" ]; then ENTRY="$cand"; break; fi
+done
+[ -n "$ENTRY" ] || { echo_red "[crowsnest] could not find entry script in $CN_DIR"; ls -l "$CN_DIR" || true; exit 1; }
+chmod +x "$ENTRY"
+ln -sf "$ENTRY" /usr/local/bin/crowsnest
 
-[cam webcam]
-mode: auto
-device: auto
-enabled: true
+# Default config
+install -d /etc
+if [ ! -s /etc/crowsnest.conf ]; then
+  cat >/etc/crowsnest.conf <<'EOF'
+# Minimal Crowsnest configuration
+[global]
+log_path: /var/log/crowsnest
+# Example cameras (adjust device paths / resolution as needed)
+#[cam rpi-libcamera]
+#mode: camera-streamer
+#device: /base/soc/i2c0mux/i2c@1/imx708@1a
+#resolution: 1280x720
+#max_fps: 30
+#port: 8080
+[cam uvc]
+mode: ustreamer
+device: /dev/video0
+resolution: 1280x720
+max_fps: 30
+port: 8081
 EOF
-  chown "$KS_USER:$KS_USER" "$CFG_DIR/crowsnest.conf"
 fi
+install -d /var/log/crowsnest
 
-MOON_CFG="$HOME_DIR/printer_data/config/moonraker.conf"
-touch "$MOON_CFG"
-if ! grep -q "^\[update_manager client crowsnest\]" "$MOON_CFG"; then
-  cat >>"$MOON_CFG" <<'EOF'
-
-[update_manager client crowsnest]
-type: git_repo
-path: ~/crowsnest
-origin: https://github.com/mainsail-crew/crowsnest.git
-install_script: tools/pkglist.sh
-managed_services: crowsnest
-EOF
-  chown "$KS_USER:$KS_USER" "$MOON_CFG" || true
-fi
-
-cat >/etc/systemd/system/crowsnest.service <<EOF
+# Systemd service
+cat >/etc/systemd/system/crowsnest.service <<'EOF'
 [Unit]
-Description=Crowsnest webcam service
+Description=Crowsnest Camera Manager
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=$KS_USER
-Group=video
-Environment=CROWSNEST_CONFIG=$CFG_DIR/crowsnest.conf
-ExecStart=$BIN_DST -c \$CROWSNEST_CONFIG
+Type=simple
+User=root
+ExecStart=/usr/local/bin/crowsnest -c /etc/crowsnest.conf
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-install -d /etc/systemd/system/multi-user.target.wants
-ln -sf /etc/systemd/system/crowsnest.service /etc/systemd/system/multi-user.target.wants/crowsnest.service
+ln -sf /etc/systemd/system/crowsnest.service /etc/systemd/system/multi-user.target.wants/crowsnest.service || true
 systemctl_if_exists daemon-reload || true
-
-MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)"
-if echo "$MODEL" | grep -q "Raspberry Pi 5"; then
-  crudini --set "$CFG_DIR/crowsnest.conf" "cam webcam" mode "ustreamer" || true
-else
-  crudini --set "$CFG_DIR/crowsnest.conf" "cam webcam" mode "camera-streamer" || true
-fi
-
-chown -R "$KS_USER:$KS_USER" "$HOME_DIR/printer_data" || true
-echo_green "[crowsnest] installed and configured"
+echo_green "[crowsnest] installed"

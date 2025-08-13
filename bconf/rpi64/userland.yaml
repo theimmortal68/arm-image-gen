@@ -1,0 +1,11 @@
+---
+# Install Raspberry Pi userland & camera utilities AFTER repo is added by firmware.yaml
+customize-hook:
+  - |
+    set -eu
+    chroot "$1" bash -euo pipefail <<'EOSH'
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    # Core Pi tools and camera stack; some names differ on Bookworm
+    apt-get install -y raspberrypi-sys-mods raspi-config raspinfo         rpicam-apps libcamera0 libcamera-tools v4l-utils ffmpeg ustreamer || true
+    EOSH

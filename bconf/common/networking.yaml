@@ -2,26 +2,4 @@
 mmdebstrap:
   packages:
     - network-manager
-
-  customize-hooks:
-    - |
-      set -eu
-
-      # Prefer NetworkManager; tone down Wi-Fi power save
-      install -d "$1/etc/NetworkManager/conf.d"
-      cat >"$1/etc/NetworkManager/conf.d/10-default-wifi-powersave.conf" <<'EOF'
-      [connection]
-      wifi.powersave = 2
-      EOF
-
-      # Disable other network stacks if present (safe no-ops otherwise)
-      chroot "$1" bash -euo pipefail <<'EOSH'
-      set -euo pipefail
-      if systemctl list-unit-files | grep -q '^systemd-networkd.service'; then
-        systemctl disable systemd-networkd || true
-        systemctl mask systemd-networkd || true
-      fi
-      if command -v netplan >/dev/null 2>&1; then
-        systemctl disable 'netplan-*' || true
-      fi
-      EOSH
+    - openssh-server

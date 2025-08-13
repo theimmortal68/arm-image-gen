@@ -4,21 +4,11 @@ set -e
 export LC_ALL=C
 source /common.sh; install_cleanup_trap
 
-# Prefer value from 00-detect-user.sh; if missing, auto-detect/fallback.
-if [ -f /etc/ks-user.conf ]; then
-  . /etc/ks-user.conf
-fi
-KS_USER="${KS_USER:-}"
+# Prefer detected user
+[ -f /etc/ks-user.conf ] && . /etc/ks-user.conf || true
+KS_USER="${KS_USER:-pi}"
 
-if [ -z "$KS_USER" ]; then
-  for u in pi ubuntu debian armbian orangepi; do
-    if getent passwd "$u" >/dev/null 2>&1; then KS_USER="$u"; break; fi
-  done
-  KS_USER="${KS_USER:-pi}"
-  echo "KS_USER=${KS_USER}" >/etc/ks-user.conf
-fi
-
-# Optional public key injection via env
+# Optional public key injection provided by workflow env
 KS_SSH_PUBKEY="${KS_SSH_PUBKEY:-}"
 
 # Ensure user exists
@@ -27,7 +17,7 @@ if ! id -u "$KS_USER" >/dev/null 2>&1; then
 fi
 
 # Add helpful groups if present on this base
-for g in sudo adm dialout tty plugdev video input render gpio; do
+for g in sudo adm dialout tty plugdev video input render gpio spi i2c netdev; do
   getent group "$g" >/dev/null 2>&1 && usermod -aG "$g" "$KS_USER" || true
 done
 
@@ -40,7 +30,7 @@ install -d -o "$KS_USER" -g "$KS_USER" \
   "$HOME_DIR/printer_data/logs" \
   "$HOME_DIR/bin"
 
-# Passwordless sudo (optional; easy to tighten later)
+# Passwordless sudo (optional; simplify headless provisioning)
 cat >/etc/sudoers.d/010-${KS_USER}-nopasswd <<EOF
 ${KS_USER} ALL=(ALL) NOPASSWD:ALL
 EOF

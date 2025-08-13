@@ -1,13 +1,10 @@
 ---
-mmdebstrap:
-  packages:
-    - openssh-server
-
-  customize-hooks:
-    - |
-      set -eu
-      # Harden root login and allow password auth by default (adjust later as needed)
-      if [ -f "$1/etc/ssh/sshd_config" ]; then
-        sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' "$1/etc/ssh/sshd_config" || true
-        sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' "$1/etc/ssh/sshd_config" || true
-      fi
+customize-hook:
+  - |
+    set -e
+    install -d "$1/etc/ssh/sshd_config.d"
+    cat > "$1/etc/ssh/sshd_config.d/10-klipper.conf" <<'EOF'
+    PubkeyAuthentication yes
+    PasswordAuthentication no
+    PermitRootLogin no
+    EOF

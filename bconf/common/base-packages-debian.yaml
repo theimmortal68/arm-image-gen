@@ -1,13 +1,8 @@
 ---
 mmdebstrap:
   suite: bookworm
-  components:
-    - main
-    - contrib
-    - non-free
-    - non-free-firmware
-  architectures:
-    - arm64
+  components: [main, contrib, non-free, non-free-firmware]
+  architectures: [arm64]
   variant: apt
   format: directory
   packages:
@@ -36,25 +31,26 @@ mmdebstrap:
     - tzdata
     - netbase
 
-  # Block services from starting in chroot (safe for all later layers)
-  setup-hook:
-    - |
-      set -e
-      install -d "$1/usr/sbin"
-      cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
-      #!/bin/sh
-      exit 101
-      EOS
-      chmod +x "$1/usr/sbin/policy-rc.d"
+setup-hook:
+  - |
+    set -e
+    install -d "$1/usr/sbin"
+    cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
+    #!/bin/sh
+    exit 101
+    EOS
+    chmod +x "$1/usr/sbin/policy-rc.d"
 
-  # Make apt a bit more resilient in CI
-  customize-hook:
-    - |
-      set -e
-      cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
-      Acquire::ForceIPv4 "true";
-      Acquire::Retries "5";
-      Acquire::http::Timeout "30";
-      Acquire::https::Timeout "30";
-      Acquire::Languages "none";
-      EOF
+    install -d "$1/etc/apt/apt.conf.d"
+    cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
+    Acquire::ForceIPv4 "true";
+    Acquire::Retries "5";
+    Acquire::http::Timeout "30";
+    Acquire::https::Timeout "30";
+    Acquire::Languages "none";
+    EOF
+
+customize-hook:
+  - |
+    set -e
+    : # (reserved for future post-install tweaks)

@@ -1,34 +1,113 @@
-
-name: Build multi-device base
-
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        device: [rpi64, orangepi5max]
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-      - name: Install deps (bdebstrap, mmdebstrap, qemu, binfmt, podman)
-        run: |
-          set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y bdebstrap mmdebstrap debian-archive-keyring qemu-user-static binfmt-support podman wget gpg curl
-          sudo update-binfmts --enable qemu-aarch64 || true
-      - name: Build ${{ matrix.device }}
-        env:
-          DEVICE: ${{ matrix.device }}
-        run: bash scripts/build-device.sh
-      - name: Upload base rootfs tarball
-        run: |
-          set -euxo pipefail
-          tar -C out/${{ matrix.device }}-bookworm-arm64 -czf out/${{ matrix.device }}-rootfs.tar.gz rootfs
-      - name: Artifact (rootfs)
-        uses: actions/upload-artifact@v4
-        with:
-          name: base-rootfs-${{ matrix.device }}
-          path: out/${{ matrix.device }}-rootfs.tar.gz
+ name: Build Multi-Device Images
+ 
+ on:
+   push:
+     branches: [ main, develop, "**" ]
+   pull_request:
+   workflow_dispatch:
+ 
+ concurrency:
+   group: multi-${{ github.ref }}
+   cancel-in-progress: true
+ 
+ jobs:
+   build:
+     runs-on: ubuntu-latest
+     strategy:
+       fail-fast: false
+       matrix:
+         include:
+           # Raspberry Pi 64-bit: Debian base + RPi firmware/userland
+           - device: rpi64
+             family: rpi
+             build_from_rootfs: true
+             enlargeroot: 8000
+ 
+           # Orange Pi 5 Max: customize official Armbian image
+           - device: orangepi5max
+             family: orangepi
+             build_from_rootfs: false
+             enlargeroot: 8000
+             # Provide a direct .img.xz URL via repo/org variable ARMBIAN_OPI5_URL
+             # Example (set in Settings → Variables → Actions): https://redirect.armbian.com/region/EU/orangepi5/Bookworm_current
+             armbian_url_var: ARMBIAN_OPI5_URL
+ 
+     env:
+       DEVICE: ${{ matrix.device }}
+       ENLARGEROOT: ${{ matrix.enlargeroot }}
+ 
+     steps:
+       - name: Checkout
+         uses: actions/checkout@v4
+         with:
+           fetch-depth: 1
+ 
+       - name: Install host tools
+         run: |
+           sudo apt-get update
+           sudo apt-get install -y --no-install-recommends \
+             mmdebstrap qemu-user-static binfmt-support \
+             ca-certificates curl wget jq git unzip rsync \
+             parted dosfstools e2fsprogs kpartx xz-utils \
+             util-linux udev mount kmod python3-pip file
+           python3 -m pip install --user --upgrade pip
+           python3 -m pip install --user bdebstrap
+           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+ 
+       - name: Tool versions
+         run: |
+           mmdebstrap --version || true
+           bdebstrap --version || true
+           qemu-aarch64-static --version || true
+           uname -a
+ 
+       # ====== Build-from-rootfs path (RPi64) ======
+       - name: Build rootfs with bdebstrap
+         if: matrix.build_from_rootfs
+         run: |
+           bash scripts/build-bdebstrap.sh "${DEVICE}" "devices/${DEVICE}/layers.yaml" "out/${DEVICE}-bookworm-arm64"
+ 
+       - name: Make bootable image (RPi)
+         if: matrix.build_from_rootfs && matrix.family == 'rpi'
+         run: |
+           sudo bash scripts/make-img-rpi.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
+ 
+       # ====== Download vendor image path (Armbian for OrangePi) ======
+       - name: Fetch Armbian image (Orange Pi)
+         if: ${{ !matrix.build_from_rootfs && matrix.family == 'orangepi' }}
+         env:
+           URL: ${{ vars[matrix.armbian_url_var] }}
+         run: |
+           set -eux
+           : "${URL:?Set repository variable ${{ matrix.armbian_url_var }} to a direct .img(.xz) URL}"
+           mkdir -p build
+           TMP="$(mktemp -d)"
+           cd "$TMP"
+           echo "[armbian] downloading: $URL"
+           curl -fL -o armbian.img.xz "$URL"
+           if file armbian.img.xz | grep -qi xz; then
+             xz -dc armbian.img.xz > armbian.img
+           else
+             mv armbian.img.xz armbian.img
+           fi
+           mv -f armbian.img "$GITHUB_WORKSPACE/build/input-${DEVICE}.img"
+           ls -lh "$GITHUB_WORKSPACE/build"
+ 
+       # ====== Customize with CustoPiZer ======
+       - name: Customize with CustoPiZer (Klipper Suite)
+         run: |
+           bash scripts/run-custopizer.sh "build/input-${DEVICE}.img" "build/output-${DEVICE}.img" "${ENLARGEROOT}"
+ 
+       - name: Summarize output
+         run: |
+           ls -lh build || true
+           stat "build/output-${DEVICE}.img" || true
+ 
+       - name: Upload image artifact
+         uses: actions/upload-artifact@v4
+         with:
+           name: ${{ matrix.device }}-image
+           path: build/output-${{ matrix.device }}.img
+           if-no-files-found: error
+           retention-days: 7
+ 

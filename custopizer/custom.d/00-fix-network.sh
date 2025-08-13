@@ -4,7 +4,7 @@ set -e
 export LC_ALL=C
 source /common.sh; install_cleanup_trap
 
-# If resolv.conf is a stub symlink or empty, replace it with static servers
+# Ensure reliable DNS inside chroot for build-time apt & fetches
 ORIG_TARGET=""
 if [ -L /etc/resolv.conf ]; then
   ORIG_TARGET="$(readlink -f /etc/resolv.conf || true)"
@@ -20,5 +20,5 @@ getent hosts deb.debian.org >/dev/null 2>&1 \
   || getent hosts archive.raspberrypi.com >/dev/null 2>&1 \
   || { echo_red "[net] DNS still broken"; cat /etc/resolv.conf || true; exit 1; }
 
-# (Optional) record what we replaced so you can restore it later
+# Record original link so a later script could restore it (optional)
 [ -n "$ORIG_TARGET" ] && echo "$ORIG_TARGET" >/etc/.resolvconf-original || true

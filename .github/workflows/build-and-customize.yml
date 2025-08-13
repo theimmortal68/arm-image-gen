@@ -1,149 +1,80 @@
-name: Build & Customize (Klipper Suite) [docker-run]
+name: Build and Customize (Klipper Suite)
 
 on:
   push:
-    branches: [ master ]
-    paths:
-      - 'bconf/**'
-      - 'devices/**'
-      - 'scripts/**'
-      - 'custopizer/**'
-      - '.github/workflows/build-and-customize-docker.yml'
+    branches: [ main, develop, "**" ]
+  pull_request:
   workflow_dispatch:
-    inputs:
-      device:
-        description: "Device key (rpi64 or orangepi5max)"
-        required: true
-        default: "rpi64"
-      board:
-        description: "OPi board hint (orangepi5 | orangepi5-plus | orangepi5-max)"
-        required: false
-      ks_user:
-        description: "Username in image (fallback: pi)"
-        required: false
-      kernel_console:
-        description: "Kernel console (OPi only)"
-        required: false
-      extra_append:
-        description: "Extra kernel args (Pi + OPi)"
-        required: false
-      arg_strategy:
-        description: "append | replace (kernel args merge)"
-        required: false
-        default: "append"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-and-customize:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [ rpi64 ]   # add more later, e.g. orangepi5max
     env:
-      DEVICE: ${{ github.event.inputs.device }}
-      KS_USER: ${{ github.event.inputs.ks_user }}
-      BOARD: ${{ github.event.inputs.board }}
-      KERNEL_CONSOLE: ${{ github.event.inputs.kernel_console }}
-      EXTRA_APPEND: ${{ github.event.inputs.extra_append }}
-      ARG_STRATEGY: ${{ github.event.inputs.arg_strategy }}
+      DEVICE: ${{ matrix.device }}
+      ENLARGEROOT: "8000"
+
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - name: Install host deps
+      - name: Install host deps (mmdebstrap, qemu-user, tooling)
         run: |
-          set -eux
           sudo apt-get update
-          sudo apt-get install -y \
-            bdebstrap mmdebstrap debian-archive-keyring \
-            qemu-user-static binfmt-support podman wget gpg curl rsync unzip \
-            parted dosfstools util-linux e2fsprogs
-          sudo update-binfmts --enable qemu-aarch64 || true
+          sudo apt-get install -y --no-install-recommends \
+            mmdebstrap qemu-user-static binfmt-support \
+            ca-certificates curl wget jq git unzip rsync \
+            parted dosfstools e2fsprogs kpartx xz-utils \
+            util-linux udev mount kmod python3-pip
+          python3 -m pip install --user --upgrade pip
+          python3 -m pip install --user bdebstrap
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Set defaults for non-dispatch runs
+      - name: Tool versions
         run: |
-          echo "DEVICE=${DEVICE:-rpi64}" >> "$GITHUB_ENV"
-          echo "BOARD=${BOARD:-}" >> "$GITHUB_ENV"
-          echo "KS_USER=${KS_USER:-}" >> "$GITHUB_ENV"
-          echo "KERNEL_CONSOLE=${KERNEL_CONSOLE:-}" >> "$GITHUB_ENV"
-          echo "EXTRA_APPEND=${EXTRA_APPEND:-}" >> "$GITHUB_ENV"
-          echo "ARG_STRATEGY=${ARG_STRATEGY:-append}" >> "$GITHUB_ENV"
+          mmdebstrap --version || true
+          bdebstrap --version || true
+          qemu-aarch64-static --version || true
+          docker --version || true
+          uname -a
 
-      - name: Build base rootfs (${{ env.DEVICE }})
+      - name: Build rootfs with bdebstrap
         run: |
-          set -eux
-          bash scripts/build-device.sh
+          bash scripts/build-bdebstrap.sh "${DEVICE}" "devices/${DEVICE}/layers.yaml" "out/${DEVICE}-bookworm-arm64"
 
-      - name: Verify base tools present
+      - name: Make bootable image (Raspberry Pi)
+        if: matrix.device == 'rpi64'
         run: |
-          set -eux
-          sudo chroot out/rpi64-bookworm-arm64/rootfs bash -lc 'dpkg -s git >/dev/null && echo "git OK"'
+          sudo bash scripts/make-img-rpi.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
 
-      - name: Assemble base image (RPi64)
-        if: env.DEVICE == 'rpi64'
-        run: |
-          set -eux
-          echo "EXTRA_APPEND: ${EXTRA_APPEND:-<none>}"
-          bash scripts/make-img-rpi.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
+      # Example placeholder for other devices:
+      # - name: Make bootable image (Orange Pi 5 Max)
+      #   if: matrix.device == 'orangepi5max'
+      #   run: |
+      #     echo "TODO: add orange pi image builder (u-boot/extlinux)"; exit 1
 
-      - name: Assemble base image (Orange Pi 5 family)
-        if: env.DEVICE == 'orangepi5max'
-        env:
-          BOARD: ${{ env.BOARD }}
-          KERNEL_CONSOLE: ${{ env.KERNEL_CONSOLE }}
-          EXTRA_APPEND: ${{ env.EXTRA_APPEND }}
-          ARG_STRATEGY: ${{ env.ARG_STRATEGY }}
+      - name: Customize with CustoPiZer (Klipper Suite)
         run: |
-          set -eux
-          echo "BOARD: ${BOARD:-<auto-detect>}"
-          echo "KERNEL_CONSOLE: ${KERNEL_CONSOLE:-<default>}"
-          echo "EXTRA_APPEND: ${EXTRA_APPEND:-<none>}"
-          echo "ARG_STRATEGY: ${ARG_STRATEGY:-append}"
-          bash scripts/make-img-orangepi5max.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
+          bash scripts/run-custopizer.sh "build/input-${DEVICE}.img" "build/output-${DEVICE}.img" "${ENLARGEROOT}"
 
-      - name: Check input image exists
+      - name: Summarize output
         run: |
-          test -s "build/input-${DEVICE}.img" || { echo "Missing build/input-${DEVICE}.img"; exit 1; }
+          ls -lh build || true
+          stat "build/output-${DEVICE}.img" || true
 
-      - name: Prepare CustoPiZer workspace
-        run: |
-          set -eux
-          mkdir -p build/workspace
-          cp -f "build/input-${DEVICE}.img" build/workspace/input.img
-          rsync -a custopizer/custom.d/ build/workspace/scripts/
-          chmod -R +x build/workspace/scripts
-          cat > build/config.local <<'EOF'
-          EDITBASE_ARCH=arm64
-          EDITBASE_IMAGE_ENLARGEROOT=8000
-          EDITBASE_IMAGE_RESIZEROOT=20
-          EDITBASE_INSTALL_POLICYKIT=0
-          EDITBASE_MOUNT_PROC=1
-          EDITBASE_MOUNT_SYS=1
-          EOF
-          
-      - name: Run CustoPiZer via docker (with DNS)
-        run: |
-          set -eux
-          docker run --rm --privileged \
-            --dns 8.8.8.8 --dns 1.1.1.1 \
-            -v "$PWD/build/workspace:/CustoPiZer/workspace" \
-            -v "$PWD/build/config.local:/CustoPiZer/config.local" \
-            ghcr.io/octoprint/custopizer:latest
-          mv -f build/workspace/output.img "build/output-${DEVICE}.img"
-    
-      - name: Collect output image
-        shell: bash
-        run: |
-          set -eux
-          OUT="build/output-${DEVICE}.img"
-          if [ -s "build/workspace/output.img" ]; then
-            mv -f build/workspace/output.img "$OUT"
-          elif [ -s "$OUT" ]; then
-            echo "Output already at $OUT"
-          else
-            echo "No output image found" >&2
-            echo "::group::build dir listing"
-            ls -lR build || true
-            echo "::endgroup::"
-            exit 1
-          fi
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.device }}-image
+          path: build/output-${{ matrix.device }}.img
+          if-no-files-found: error
+          retention-days: 7

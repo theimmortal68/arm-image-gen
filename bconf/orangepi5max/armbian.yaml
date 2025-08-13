@@ -1,46 +1,20 @@
 ---
-mmdebstrap:
-  packages:
-    - linux-image-current-rockchip-rk3588
-    - linux-dtb-current-rockchip-rk3588
-    - linux-u-boot-orangepi5-max-current
-    - armbian-bsp-cli-orangepi5-max-current
-    - armbian-firmware
-    - u-boot-tools
-    - parted
+# Add Armbian apt repo + key; kernel packages are board-specific and usually handled by Armbian images.
+customize-hook:
+  - |
+    set -eu
+    install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d"
+    curl -fsSL https://apt.armbian.com/armbian.key | gpg --dearmor -o "$1/usr/share/keyrings/armbian-archive-keyring.gpg"
+    chmod 0644 "$1/usr/share/keyrings/armbian-archive-keyring.gpg"
 
-  customize-hooks:
-    - |
-      set -eu
-      export DEBIAN_FRONTEND=noninteractive
+    cat > "$1/etc/apt/sources.list.d/armbian.list" <<'EOF'
+    deb [signed-by=/usr/share/keyrings/armbian-archive-keyring.gpg] http://apt.armbian.com bookworm main utils desktop
+    EOF
 
-      printf "orangepi5max\n" > "$1/etc/device-id"
-      install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d" "$1/etc/apt/preferences.d" "$1/boot"
-
-      # Armbian repo + key
-      wget -qO- https://apt.armbian.com/armbian.key | gpg --dearmor > "$1/usr/share/keyrings/armbian.gpg"
-      chmod 0644 "$1/usr/share/keyrings/armbian.gpg"
-
-      cat >"$1/etc/apt/sources.list.d/armbian.list" <<'EOF'
-      deb [signed-by=/usr/share/keyrings/armbian.gpg] http://apt.armbian.com bookworm main bookworm-utils bookworm-desktop
-      EOF
-
-      # Pin Armbian kernel/uboot/bsp HIGH so Debian can't override
-      cat >"$1/etc/apt/preferences.d/99-armbian-kernel.pref" <<'EOF'
-      Package: linux-image-*-rockchip-rk3588 linux-dtb-*-rockchip-rk3588 linux-u-boot-orangepi5-max-* armbian-bsp-cli-orangepi5-max-* armbian-firmware
-      Pin: origin apt.armbian.com
-      Pin-Priority: 1001
-      EOF
-
-      chroot "$1" bash -euo pipefail <<'EOSH'
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update
-      apt-get install -y \
-        linux-image-current-rockchip-rk3588 \
-        linux-dtb-current-rockchip-rk3588 \
-        linux-u-boot-orangepi5-max-current \
-        armbian-bsp-cli-orangepi5-max-current \
-        armbian-firmware \
-        u-boot-tools \
-        parted
-      EOSH
+    # Keep a place-holder install that won't fail if packages vary by board
+    chroot "$1" bash -euo pipefail <<'EOSH'
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    # Firmware package is generic; kernel/uboot are highly board-specific and left to device-specific scripts/images
+    apt-get install -y armbian-firmware || true
+    EOSH

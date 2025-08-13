@@ -1,8 +1,8 @@
-# bconf/common/base-packages-armbian.yaml
+---
 mmdebstrap:
   suite: bookworm
-  components: [ main, contrib, non-free, non-free-firmware ]
-  architectures: [ arm64 ]
+  components: [main, contrib, non-free, non-free-firmware]
+  architectures: [arm64]
   variant: apt
   format: directory
   packages:
@@ -26,6 +26,10 @@ mmdebstrap:
     - libffi-dev
     - libusb-1.0-0-dev
     - libncurses-dev
+    - locales
+    - tzdata
+    - netbase
+
 setup-hook:
   - |
     set -e
@@ -35,12 +39,17 @@ setup-hook:
     exit 101
     EOS
     chmod +x "$1/usr/sbin/policy-rc.d"
-customize-hook:
-  - |
-    set -e
+
+    install -d "$1/etc/apt/apt.conf.d"
     cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
     Acquire::ForceIPv4 "true";
     Acquire::Retries "5";
     Acquire::http::Timeout "30";
     Acquire::https::Timeout "30";
+    Acquire::Languages "none";
     EOF
+
+customize-hook:
+  - |
+    set -e
+    : # (reserved for future post-install tweaks)
