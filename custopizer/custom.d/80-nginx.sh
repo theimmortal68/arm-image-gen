@@ -2,8 +2,7 @@
 set -x
 set -e
 export LC_ALL=C
-source /common.sh
-install_cleanup_trap
+source /common.sh; install_cleanup_trap
 
 # Make sure nginx stays quiet if not installed on some base
 if is_in_apt nginx; then
