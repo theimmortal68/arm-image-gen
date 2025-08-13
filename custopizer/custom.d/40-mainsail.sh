@@ -1,4 +1,8 @@
 #!/bin/bash
+# Install Mainsail from the latest GitHub release asset (mainsail.zip)
+# - No Node.js build, just unzip the prebuilt bundle.
+# - Adds Moonraker Update Manager entry: type=web (tracks releases).
+
 set -x
 set -e
 export LC_ALL=C
@@ -19,68 +23,40 @@ HOME_DIR="$(getent passwd "$KS_USER" | cut -d: -f6)"
 export DEBIAN_FRONTEND=noninteractive
 retry 4 2 apt-get update
 
-# Tools we need (add zip/unzip to satisfy npm's build.zip step)
-for p in ca-certificates curl git rsync jq zip unzip; do
+# Tools we need for fetching/unpacking & serving
+for p in ca-certificates curl wget unzip rsync nginx; do
   is_in_apt "$p" && apt-get install -y --no-install-recommends "$p" || true
 done
 
-# Ensure Node.js >= 20
-NEED_NODE=1
-if command -v node >/dev/null 2>&1; then
-  NV_MAJOR="$(node -v | sed 's/^v//;s/\..*//')"
-  if [ "${NV_MAJOR:-0}" -ge 20 ]; then NEED_NODE=0; fi
-fi
-if [ "$NEED_NODE" -eq 1 ]; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-  apt-get install -y --no-install-recommends nodejs
-fi
-
-SRC_DIR="$HOME_DIR/mainsail-src"
 WEBROOT="$HOME_DIR/mainsail"
+TMP="/tmp/mainsail.zip"
+TMPDIR="/tmp/_mainsail_zip"
 
-# Clone or update repo
-if [ ! -d "$SRC_DIR/.git" ]; then
-  sudo -u "$KS_USER" git clone --depth=1 https://github.com/mainsail-crew/mainsail.git "$SRC_DIR"
-else
-  sudo -u "$KS_USER" git -C "$SRC_DIR" fetch --all --prune || true
-fi
+# Clean any previous temp dir
+rm -rf "$TMPDIR" && mkdir -p "$TMPDIR"
 
-# Prefer master → then main → then develop
-sudo -u "$KS_USER" bash -lc '
-  set -e
-  cd "'"$SRC_DIR"'"
-  git fetch --depth=1 origin master || true
-  git fetch --depth=1 origin main || true
-  git fetch --depth=1 origin develop || true
-  if git ls-remote --exit-code --heads origin master >/dev/null 2>&1; then
-    git checkout -B master origin/master
-  elif git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
-    git checkout -B main origin/main
-  elif git ls-remote --exit-code --heads origin develop >/dev/null 2>&1; then
-    git checkout -B develop origin/develop
-  else
-    echo "No suitable branch (master/main/develop) found"; exit 1
-  fi
-'
+# Always pull the canonical asset name used by releases:
+URL="https://github.com/mainsail-crew/mainsail/releases/latest/download/mainsail.zip"
+echo_green "[mainsail] downloading latest release asset → $URL"
+retry 4 2 wget -O "$TMP" "$URL"
 
-# Build (quiet-ish)
-export npm_config_audit=false npm_config_fund=false
-sudo -u "$KS_USER" bash -lc "cd '$SRC_DIR' && npm ci && npm run build"
+# Unpack, handling both flat and nested layouts
+unzip -o "$TMP" -d "$TMPDIR"
+SRC="$TMPDIR"
+[ -d "$TMPDIR/mainsail" ] && SRC="$TMPDIR/mainsail"
 
-# Install built assets
+# Install to webroot
 install -d "$WEBROOT"
-rsync -a --delete "$SRC_DIR"/dist/ "$WEBROOT"/
+rsync -a --delete "$SRC/""$WEBROOT/"
 chown -R "$KS_USER:$KS_USER" "$WEBROOT"
 
-# Health checks
+# Health checks (fail if broken)
 test -s "$WEBROOT/index.html" || { echo_red "[mainsail] index.html missing"; exit 1; }
-grep -Eo 'src=\"/assets/.+\.js' "$WEBROOT/index.html" >/dev/null || {
+grep -Eo 'src="/assets/.+\.js' "$WEBROOT/index.html" >/dev/null || {
   echo_red "[mainsail] no JS bundle referenced in index.html"; exit 1; }
 
-# Nginx site
-if is_in_apt nginx; then
-  apt-get install -y --no-install-recommends nginx || true
-  cat >/etc/nginx/sites-available/mainsail <<EOF
+# Nginx site (idempotent)
+cat >/etc/nginx/sites-available/mainsail <<EOF
 server {
     listen 80;
     server_name _;
@@ -103,18 +79,16 @@ server {
     location /access  { proxy_pass http://127.0.0.1:7125/access;  proxy_set_header X-Real-IP \$remote_addr; }
 }
 EOF
-  rm -f /etc/nginx/sites-enabled/default || true
-  ln -sf /etc/nginx/sites-available/mainsail /etc/nginx/sites-enabled/mainsail
-  systemctl_if_exists daemon-reload || true
-  systemctl_if_exists enable nginx || true
-fi
+rm -f /etc/nginx/sites-enabled/default || true
+ln -sf /etc/nginx/sites-available/mainsail /etc/nginx/sites-enabled/mainsail
+systemctl_if_exists daemon-reload || true
+systemctl_if_exists enable nginx || true
 
-# Moonraker Update Manager: git_repo on master
+# Moonraker Update Manager: ensure 'type: web' entry (remove any old git_repo block first)
 MOON_CFG="$HOME_DIR/printer_data/config/moonraker.conf"
 install -d "$(dirname "$MOON_CFG")"
 touch "$MOON_CFG"; chown "$KS_USER:$KS_USER" "$MOON_CFG"
 
-# Remove any old 'type: web' mainsail block
 if grep -q "^\[update_manager mainsail\]" "$MOON_CFG"; then
   awk '
     BEGIN{skip=0}
@@ -124,34 +98,13 @@ if grep -q "^\[update_manager mainsail\]" "$MOON_CFG"; then
   ' "$MOON_CFG" >"$MOON_CFG.tmp" && mv "$MOON_CFG.tmp" "$MOON_CFG"
 fi
 
-# Script for Moonraker to rebuild & sync
-cat >"$SRC_DIR/.moonraker-install.sh" <<'EOS'
-#!/bin/bash
-set -e
-set -x
-export LC_ALL=C
-npm ci
-npm run build
-WEBROOT="$HOME/mainsail"
-mkdir -p "$WEBROOT"
-rsync -a --delete dist/ "$WEBROOT/"
-EOS
-chown "$KS_USER:$KS_USER" "$SRC_DIR/.moonraker-install.sh"
-chmod +x "$SRC_DIR/.moonraker-install.sh"
-
-# Add UM entry if missing
-if ! grep -q "^\[update_manager mainsail\]" "$MOON_CFG"; then
-  cat >>"$MOON_CFG" <<EOF
+cat >>"$MOON_CFG" <<'EOF'
 
 [update_manager mainsail]
-type: git_repo
-path: ~/mainsail-src
-origin: https://github.com/mainsail-crew/mainsail.git
-primary_branch: master
-install_script: .moonraker-install.sh
-managed_services: nginx
+type: web
+repo: mainsail-crew/mainsail
+path: ~/mainsail
 EOF
-  chown "$KS_USER:$KS_USER" "$MOON_CFG"
-fi
+chown "$KS_USER:$KS_USER" "$MOON_CFG"
 
-echo_green "[mainsail] built from master and installed to $WEBROOT"
+# Optional: remove leftover git source tree to
