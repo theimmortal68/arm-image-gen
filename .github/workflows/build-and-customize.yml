@@ -27,25 +27,60 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install host deps (mmdebstrap, qemu-user, tooling)
+      - name: Install mmdebstrap (v1.5.7) + bdebstrap (from GitHub)+ host deps (qemu-user, tooling)
+        env:
+          MMDEBSTRAP_REF: v1.5.7       # or 1.5.7 if the tag lacks the 'v' prefix
+          BDEBSTRAP_REF:  v0.7.0       # pick your preferred tag or 'main'
+        shell: bash
         run: |
+          set -euo pipefail
+
+          # OS-level tools you need regardless
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            mmdebstrap qemu-user-static binfmt-support \
+            qemu-user-static binfmt-support \
             ca-certificates curl wget jq git unzip rsync \
             parted dosfstools e2fsprogs kpartx xz-utils \
-            util-linux udev mount kmod python3-pip
-          python3 -m pip install --user --upgrade pip
-          python3 -m pip install --user bdebstrap
+            util-linux udev mount kmod file perl python3-pip
+
+          # -------- mmdebstrap from upstream GitLab (v1.5.7) --------
+          TMP="$(mktemp -d)"
+          pushd "$TMP" >/dev/null
+      
+          # Try with 'v' prefix first, then without (GitLab tag naming varies)
+          for REF in "${MMDEBSTRAP_REF}" "${MMDEBSTRAP_REF#v}"; do
+            URL="https://gitlab.mister-muffin.de/josch/mmdebstrap/-/archive/${REF}/mmdebstrap-${REF}.tar.gz"
+            echo "[mmdebstrap] downloading ${URL}"
+            if curl -fL -o src.tgz "$URL"; then
+              break
+            fi
+            rm -f src.tgz
+          done
+
+          [ -s src.tgz ] || { echo "Failed to download mmdebstrap ${MMDEBSTRAP_REF}" >&2; exit 1; }
+          tar xf src.tgz
+          cd mmdebstrap-*
+          # Install the main script (manpage and extras are optional)
+          sudo install -D -m 0755 mmdebstrap /usr/local/bin/mmdebstrap
+          # Best-effort install of extras if present in this release
+          sudo install -D -m 0644 mmdebstrap.1 /usr/local/share/man/man1/mmdebstrap.1 2>/dev/null || true
+          if [ -d share/mmdebstrap ]; then
+            sudo mkdir -p /usr/local/share/mmdebstrap
+            sudo cp -a share/mmdebstrap/. /usr/local/share/mmdebstrap/ || true
+          fi
+          popd >/dev/null
+          rm -rf "$TMP"
+
+          # -------- bdebstrap from upstream GitHub --------
+          python3 -m pip install --user --upgrade pip wheel
+          python3 -m pip install --user "git+https://github.com/bdrung/bdebstrap@${BDEBSTRAP_REF}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Tool versions
-        run: |
-          mmdebstrap --version || true
-          bdebstrap --version || true
-          qemu-aarch64-static --version || true
-          docker --version || true
-          uname -a
+          # -------- sanity checks --------
+          echo "== versions =="
+          command -v mmdebstrap;  mmdebstrap --version || true
+          command -v bdebstrap;   bdebstrap --version  || true
+          command -v qemu-aarch64-static || true
 
       - name: Build rootfs with bdebstrap
         run: |
