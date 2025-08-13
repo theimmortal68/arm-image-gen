@@ -117,11 +117,13 @@ jobs:
       - name: Run CustoPiZer via docker (with DNS)
         run: |
           set -eux
-          docker run --rm --privileged --dns 8.8.8.8 \
+          docker run --rm --privileged \
+            --dns 8.8.8.8 --dns 1.1.1.1 \
             -v "$PWD/build/workspace:/CustoPiZer/workspace" \
             -v "$PWD/build/config.local:/CustoPiZer/config.local" \
             ghcr.io/octoprint/custopizer:latest
-
+          mv -f build/workspace/output.img "build/output-${DEVICE}.img"
+    
       - name: Collect customized image
         run: |
           set -eux
