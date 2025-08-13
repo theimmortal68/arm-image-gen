@@ -1,17 +1,25 @@
+#!/bin/bash
+set -x
+set -e
+export LC_ALL=C
 
-#!/usr/bin/env bash
-set -euo pipefail
+source /common.sh
+install_cleanup_trap
 
+# If KS_USER already provided (e.g. via workflow), keep it.
 if [ -n "${KS_USER:-}" ]; then
-  USER="$KS_USER"
+  CANDIDATE="$KS_USER"
 else
-  USER="$(awk -F: '$3>=1000 && $1!="nobody"{print $1; exit}' /etc/passwd || true)"
+  # Try to detect an existing non-system user we could adopt
+  for u in pi ubuntu debian armbian orangepi; do
+    if getent passwd "$u" >/dev/null 2>&1; then
+      CANDIDATE="$u"
+      break
+    fi
+  done
+  CANDIDATE="${CANDIDATE:-pi}"
 fi
 
-if [ -z "${USER:-}" ]; then
-  echo "[customizer] No non-root user detected; later step will create one."
-else
-  echo "[customizer] Using existing user: ${USER}"
-fi
-
-echo "KS_USER=${USER:-}" > /root/.custopizer_user_env
+# Persist for subsequent scripts (env doesn't persist between scripts)
+echo "KS_USER=${CANDIDATE}" >/etc/ks-user.conf
+echo_green "[detect-user] KS_USER=${CANDIDATE} (written to /etc/ks-user.conf)"

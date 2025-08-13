@@ -1,66 +1,96 @@
+#!/bin/bash
+set -x
+set -e
+export LC_ALL=C
+source /common.sh
+install_cleanup_trap
 
-#!/usr/bin/env bash
-set -euo pipefail
-source /root/.custopizer_user_env || true
-USER="${KS_USER}"
-: "${USER:?KS_USER not set}"
-HOME_DIR="$(getent passwd "${USER}" | cut -d: -f6)"
+KS_USER="${KS_USER:-pi}"
+HOME_DIR="$(getent passwd "$KS_USER" | cut -d: -f6)"
+[ -n "$HOME_DIR" ] || { echo_red "User $KS_USER missing"; exit 1; }
 
-su - "${USER}" -c "git clone --depth=1 https://github.com/Arksine/moonraker ${HOME_DIR}/moonraker"
-su - "${USER}" -c "python3 -m venv ${HOME_DIR}/moonraker-env"
-su - "${USER}" -c "${HOME_DIR}/moonraker-env/bin/pip install -U pip wheel"
-su - "${USER}" -c "${HOME_DIR}/moonraker-env/bin/pip install -r ${HOME_DIR}/moonraker/scripts/moonraker-requirements.txt"
+retry 4 2 apt-get update
+is_in_apt python3-venv || { echo_red "[moonraker] python3-venv missing"; exit 1; }
 
-cat >"${HOME_DIR}/moonraker.conf" <<'EOF'
+# Clone/update Moonraker
+if [ ! -d "$HOME_DIR/moonraker/.git" ]; then
+  sudo -u "$KS_USER" git clone --depth=1 https://github.com/Arksine/moonraker.git "$HOME_DIR/moonraker"
+else
+  sudo -u "$KS_USER" git -C "$HOME_DIR/moonraker" fetch --depth=1 origin || true
+  sudo -u "$KS_USER" git -C "$HOME_DIR/moonraker" reset --hard origin/master || true
+fi
+
+# venv
+if [ ! -d "$HOME_DIR/moonraker-env" ]; then
+  sudo -u "$KS_USER" python3 -m venv "$HOME_DIR/moonraker-env"
+fi
+sudo -u "$KS_USER" "$HOME_DIR/moonraker-env/bin/pip" install -U pip wheel setuptools
+sudo -u "$KS_USER" "$HOME_DIR/moonraker-env/bin/pip" install -r "$HOME_DIR/moonraker/scripts/moonraker-requirements.txt"
+
+# Minimal moonraker.conf (append-only if file exists)
+MOON_CFG="$HOME_DIR/printer_data/config/moonraker.conf"
+touch "$MOON_CFG"
+chown "$KS_USER:$KS_USER" "$MOON_CFG"
+
+# Ensure core sections exist
+grep -q '^\[server\]' "$MOON_CFG" || cat >>"$MOON_CFG" <<'EOF'
+
 [server]
 host: 0.0.0.0
 port: 7125
-enable_debug_logging: False
+EOF
+
+grep -q '^\[authorization\]' "$MOON_CFG" || cat >>"$MOON_CFG" <<'EOF'
 
 [authorization]
-trusted_clients:
-  127.0.0.1
-  ::1
-cors_domains:
-  *.local
-  *.lan
-  192.168.0.0/16
-  10.0.0.0/8
-
-[machine]
-provider: systemd_cli
-
-[octoprint_compat]
-
-[history]
-
-[virtual_sdcard]
-path: ~/printer_data/gcodes
-
-[database]
-
-[update_manager]
-channel: stable
+enabled: true
 EOF
-chown "${USER}:${USER}" "${HOME_DIR}/moonraker.conf"
 
+grep -q '^\[octoprint_compat\]' "$MOON_CFG" || echo -e "\n[octoprint_compat]\n" >>"$MOON_CFG"
+
+# Update manager entries
+add_um() {
+  local header="$1"; shift
+  if ! grep -q "^\[$header\]" "$MOON_CFG"; then
+    echo >>"$MOON_CFG"
+    echo "[$header]" >>"$MOON_CFG"
+    cat >>"$MOON_CFG"
+  fi
+}
+
+add_um "update_manager mainsail" <<'EOF'
+type: web
+repo: mainsail-crew/mainsail
+path: ~/mainsail
+EOF
+
+add_um "update_manager klipper" <<'EOF'
+type: git_repo
+path: ~/klipper
+origin: https://github.com/Klipper3d/klipper.git
+managed_services: klipper
+EOF
+
+# crowsnest updater is also added in 53-crowsnest.sh; keep it idempotent.
+
+# Systemd service
 cat >/etc/systemd/system/moonraker.service <<EOF
 [Unit]
 Description=Moonraker API Server
 After=network-online.target klipper.service
-Requires=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=simple
-User=${USER}
-WorkingDirectory=${HOME_DIR}
-ExecStart=${HOME_DIR}/moonraker-env/bin/python ${HOME_DIR}/moonraker/moonraker/moonraker.py -c ${HOME_DIR}/moonraker.conf
-Restart=on-failure
-RestartSec=3
-SyslogIdentifier=moonraker
+User=$KS_USER
+ExecStart=$HOME_DIR/moonraker-env/bin/python $HOME_DIR/moonraker/moonraker/moonraker.py -c $MOON_CFG
+Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-systemctl enable moonraker || true
+install -d /etc/systemd/system/multi-user.target.wants
+ln -sf /etc/systemd/system/moonraker.service /etc/systemd/system/multi-user.target.wants/moonraker.service
+systemctl_if_exists daemon-reload || true
+
+echo_green "[moonraker] installed"
