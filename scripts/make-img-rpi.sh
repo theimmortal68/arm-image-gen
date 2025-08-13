@@ -49,8 +49,17 @@ sudo mkfs.ext4 -F -L rootfs "${LOOP}p2"
 BOOTMNT=$(mktemp -d)
 ROOTMNT=$(mktemp -d)
 sudo mount "${LOOP}p2" "$ROOTMNT"
-sudo rsync -aHAX --info=progress2 "$ROOTFS"/ "$ROOTMNT"/
+# BEFORE:
+# sudo rsync -aHAX --info=progress2 "$ROOTFS"/ "$ROOTMNT"/
 
+# AFTER: preserve attrs, but force root:root ownership in the image
+sudo rsync -aHAX --numeric-ids --chown=0:0 --info=progress2 "$ROOTFS"/ "$ROOTMNT"/
+
+# Ensure sudo is owned by root and setuid (belt & suspenders)
+if [ -f "$ROOTMNT/usr/bin/sudo" ]; then
+  sudo chown 0:0 "$ROOTMNT/usr/bin/sudo"
+  sudo chmod 4755 "$ROOTMNT/usr/bin/sudo"
+fi
 sudo mount "${LOOP}p1" "$BOOTMNT"
 if [ -d "$ROOTMNT/boot/firmware" ]; then
   # FAT32 doesn't support chown/perms; avoid -a
