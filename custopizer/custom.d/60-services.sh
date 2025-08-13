@@ -2,8 +2,7 @@
 set -x
 set -e
 export LC_ALL=C
-source /common.sh
-install_cleanup_trap
+source /common.sh; install_cleanup_trap
 
 # Enable core services (CustoPiZer blocks starting during build)
 for s in klipper.service moonraker.service crowsnest.service nginx.service; do
