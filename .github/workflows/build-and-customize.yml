@@ -97,17 +97,28 @@ jobs:
           echo "EXTRA_APPEND: ${EXTRA_APPEND:-<none>}"
           bash scripts/make-img-orangepi5max.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
 
-      - name: Customize with CustoPiZer (Klipper Suite)
+      - name: Prepare CustoPiZer workspace
         run: |
           set -euxo pipefail
-          # Map build/ and custom.d into the container; use absolute paths inside
-          docker run --rm \
-            -v "$PWD/build:/work" \
-            -v "$PWD/custopizer/custom.d:/custom.d" \
-            ghcr.io/octoprint/custopizer:latest \
-            --image "/work/input-${DEVICE}.img" \
-            --customizations "/custom.d" \
-            --out "/work/output-${DEVICE}.img"
+          mkdir -p build/workspace
+          cp -f "build/input-${DEVICE}.img" build/workspace/input.img
+          # make sure scripts are executable
+          chmod -R +x custopizer/custom.d
+
+      - name: Run CustoPiZer
+        uses: OctoPrint/CustoPiZer@main
+        with:
+          workspace: "${{ github.workspace }}/build/workspace"
+          scripts:   "${{ github.workspace }}/custopizer/custom.d"
+          # optional:
+          # config:   "${{ github.workspace }}/config.local"
+          # environment: '{ "OCTOPRINT_VERSION": "1.10.2" }'
+
+      - name: Collect customized image
+        run: |
+          set -euxo pipefail
+          test -s build/workspace/output.img
+          mv -f build/workspace/output.img "build/output-${DEVICE}.img"
 
       - name: Upload customized image
         uses: actions/upload-artifact@v4
