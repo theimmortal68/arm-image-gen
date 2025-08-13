@@ -29,7 +29,7 @@ jobs:
 
       - name: Install mmdebstrap (v1.5.7) + bdebstrap (from GitHub)+ host deps (qemu-user, tooling)
         env:
-          MMDEBSTRAP_REF: v1.5.7       # or 1.5.7 if the tag lacks the 'v' prefix
+          MMDEBSTRAP_REF: "1.5.7"      # tag name on GitLab (no 'v' prefix)
           BDEBSTRAP_REF:  v0.7.0       # pick your preferred tag or 'main'
         shell: bash
         run: |
@@ -43,33 +43,22 @@ jobs:
             parted dosfstools e2fsprogs kpartx xz-utils \
             util-linux udev mount kmod file perl python3-pip
 
-          # -------- mmdebstrap from upstream GitLab (v1.5.7) --------
-          TMP="$(mktemp -d)"
-          pushd "$TMP" >/dev/null
-      
-          # Try with 'v' prefix first, then without (GitLab tag naming varies)
-          for REF in "${MMDEBSTRAP_REF}" "${MMDEBSTRAP_REF#v}"; do
-            URL="https://gitlab.mister-muffin.de/josch/mmdebstrap/-/archive/${REF}/mmdebstrap-${REF}.tar.gz"
-            echo "[mmdebstrap] downloading ${URL}"
-            if curl -fL -o src.tgz "$URL"; then
-              break
-            fi
-            rm -f src.tgz
-          done
+          # ---- mmdebstrap from GitLab (clone the exact tag) ----
+          rm -rf mmdebstrap-src
+          git clone --depth=1 --branch "${MMDEBSTRAP_TAG}" \
+            https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src || {
+            echo "Direct clone of tag ${MMDEBSTRAP_TAG} failed, trying with 'v' prefix…"
+            git clone --depth=1 --branch "v${MMDEBSTRAP_TAG}" \
+              https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src
+          }
 
-          [ -s src.tgz ] || { echo "Failed to download mmdebstrap ${MMDEBSTRAP_REF}" >&2; exit 1; }
-          tar xf src.tgz
-          cd mmdebstrap-*
-          # Install the main script (manpage and extras are optional)
-          sudo install -D -m 0755 mmdebstrap /usr/local/bin/mmdebstrap
-          # Best-effort install of extras if present in this release
-          sudo install -D -m 0644 mmdebstrap.1 /usr/local/share/man/man1/mmdebstrap.1 2>/dev/null || true
-          if [ -d share/mmdebstrap ]; then
-            sudo mkdir -p /usr/local/share/mmdebstrap
-            sudo cp -a share/mmdebstrap/. /usr/local/share/mmdebstrap/ || true
-          fi
-          popd >/dev/null
-          rm -rf "$TMP"
+          sudo install -D -m 0755 mmdebstrap-src/mmdebstrap /usr/local/bin/mmdebstrap
+          # Optional extras if present in this tag:
+          [ -f mmdebstrap-src/mmdebstrap.1 ] && \
+            sudo install -D -m 0644 mmdebstrap-src/mmdebstrap.1 /usr/local/share/man/man1/mmdebstrap.1 || true
+          [ -d mmdebstrap-src/share/mmdebstrap ] && \
+            sudo mkdir -p /usr/local/share/mmdebstrap && \
+            sudo cp -a mmdebstrap-src/share/mmdebstrap/. /usr/local/share/mmdebstrap/ || true
 
           # -------- bdebstrap from upstream GitHub --------
           python3 -m pip install --user --upgrade pip wheel
