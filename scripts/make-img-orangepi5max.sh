@@ -67,7 +67,15 @@ sudo mkfs.ext4 -F -L rootfs "${LOOP}p1"
 
 ROOTMNT=$(mktemp -d)
 sudo mount "${LOOP}p1" "$ROOTMNT"
-sudo rsync -aHAX --info=progress2 "$ROOTFS"/ "$ROOTMNT"/
+# BEFORE:
+# sudo rsync -aHAX --info=progress2 "$ROOTFS"/ "$ROOTMNT"/
+
+# AFTER:
+sudo rsync -aHAX --numeric-ids --chown=0:0 --info=progress2 "$ROOTFS"/ "$ROOTMNT"/
+if [ -f "$ROOTMNT/usr/bin/sudo" ]; then
+  sudo chown 0:0 "$ROOTMNT/usr/bin/sudo"
+  sudo chmod 4755 "$ROOTMNT/usr/bin/sudo"
+fi
 
 ROOT_UUID=$(sudo blkid -s UUID -o value "${LOOP}p1")
 sudo tee "$ROOTMNT/etc/fstab" >/dev/null <<EOF
