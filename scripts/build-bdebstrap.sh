@@ -22,22 +22,26 @@ if [ ! -s "$LAYERS_FILE" ]; then
   exit 1
 fi
 
-# Extract YAML list entries (lines beginning with "- ") as config paths.
-# This intentionally keeps things simple; it assumes your layers.yaml only lists the files you want.
-readarray -t CONFIGS < <(
-  awk '
-    /^[[:space:]]*-[[:space:]]/ {
-      sub(/^- /, "", $0);
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0);
-      print $0
-    }
-  ' "$LAYERS_FILE" | sed '/^#/d;/^$/d'
+# Normalize CRLF and extract YAML list entries (strip leading "- " with optional indents)
+# Also strip trailing comments and whitespace.
+mapfile -t CONFIGS < <(
+  sed 's/\r$//' "$LAYERS_FILE" \
+  | sed -E -n 's/^[[:space:]]*-[[:space:]]+([^#]+).*$/\1/p' \
+  | sed -E 's/[[:space:]]+$//'
 )
 
 if [ "${#CONFIGS[@]}" -eq 0 ]; then
   echo "ERROR: No config entries found in $LAYERS_FILE" >&2
   exit 1
 fi
+
+# Verify each config exists before running
+for cfg in "${CONFIGS[@]}"; do
+  if [ ! -f "$cfg" ]; then
+    echo "ERROR: layer file not found: $cfg" >&2
+    exit 1
+  fi
+done
 
 echo "==> Building ${DEVICE} with configs:"
 for c in "${CONFIGS[@]}"; do
@@ -51,7 +55,7 @@ if [ -e "$OUTDIR" ]; then
 fi
 mkdir -p "$(dirname "$OUTDIR")"
 
-# Prefer running under 'podman unshare' if available (helps with subuid/subgid mount permissions)
+# Prefer running under 'podman unshare' if available (helps with mount/perms)
 RUNNER_ARR=()
 if command -v podman >/dev/null 2>&1; then
   RUNNER_ARR=(podman unshare --)
