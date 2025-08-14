@@ -5,59 +5,65 @@ source /common.sh; install_cleanup_trap
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Ensure basic deps (most from base layer; these are belt & suspenders)
-for p in git curl jq v4l-utils ffmpeg ustreamer; do
-  is_in_apt "$p" && ! is_installed "$p" && apt-get update && apt-get install -y --no-install-recommends "$p" || true
-done
+# Ensure basic deps (best-effort; ignore if some not available)
+apt-get update
+apt-get install -y --no-install-recommends git curl jq v4l-utils ffmpeg ustreamer python3
 
 # Install Crowsnest from upstream git
 CN_DIR="/opt/crowsnest"
 if [ ! -d "$CN_DIR/.git" ]; then
   git clone --depth=1 https://github.com/mainsail-crew/crowsnest.git "$CN_DIR"
 else
-  git -C "$CN_DIR" fetch --depth=1 origin || true
-  git -C "$CN_DIR" reset --hard origin/master || true
+  git -C "$CN_DIR" fetch --depth=1 origin
+  git -C "$CN_DIR" reset --hard origin/$(git -C "$CN_DIR" rev-parse --abbrev-ref HEAD)
 fi
 
-# Detect runnable entry
-ENTRY=""
-for cand in "$CN_DIR/crowsnest" "$CN_DIR/crowsnest.sh" "$CN_DIR/crowsnest.py"; do
-  if [ -f "$cand" ]; then ENTRY="$cand"; break; fi
-done
-[ -n "$ENTRY" ] || { echo_red "[crowsnest] could not find entry script in $CN_DIR"; ls -l "$CN_DIR" || true; exit 1; }
-chmod +x "$ENTRY"
+# Install entrypoint wrapper into PATH
+ENTRY="/usr/local/bin/crowsnest"
+if [ -x "$CN_DIR/crowsnest" ]; then
+  install -Dm0755 "$CN_DIR/crowsnest" "$ENTRY"
+elif [ -f "$CN_DIR/crowsnest.py" ]; then
+  cat >"$ENTRY" <<'EOF'
+#!/usr/bin/env bash
+exec python3 -u /opt/crowsnest/crowsnest.py "$@"
+EOF
+  chmod 0755 "$ENTRY"
+else
+  echo_red "[crowsnest] could not find upstream entrypoint"
+  ls -la "$CN_DIR" || true
+  exit 1
+fi
 ln -sf "$ENTRY" /usr/local/bin/crowsnest
 
-# Default config
+# Default config (only if absent)
 install -d /etc
-if [ ! -s /etc/crowsnest.conf ]; then
+if [ ! -f /etc/crowsnest.conf ]; then
   cat >/etc/crowsnest.conf <<'EOF'
-# Minimal Crowsnest configuration
+# Minimal example; adjust in your per-device layer
 [global]
-log_path: /var/log/crowsnest
-# Example cameras (adjust device paths / resolution as needed)
-#[cam rpi-libcamera]
-#mode: camera-streamer
-#device: /base/soc/i2c0mux/i2c@1/imx708@1a
-#resolution: 1280x720
-#max_fps: 30
-#port: 8080
-[cam uvc]
-mode: ustreamer
-device: /dev/video0
-resolution: 1280x720
-max_fps: 30
-port: 8081
+log_level = info
+[streamer]
+type = camera-streamer
+device = auto
 EOF
 fi
+
 install -d /var/log/crowsnest
 
-# Systemd service
+# --- Camera runtime sanity (soft checks; don't fail chroot build) ---
+if command -v camera-streamer >/dev/null 2>&1; then
+  echo_green "[crowsnest] camera-streamer present: $(camera-streamer --version 2>/dev/null | head -n1 || echo unknown)"
+  ldd "$(command -v camera-streamer)" | awk '/=>/ {print "[ldd] " $0}' || true
+else
+  echo_red "[crowsnest] WARN: camera-streamer not found in PATH (OK if using ustreamer-only config)"
+fi
+v4l2-ctl --version 2>/dev/null || echo_red "[crowsnest] WARN: v4l-utils missing or not runnable (OK in chroot)"
+
+# Systemd unit (enable via symlink; do not start in chroot)
 cat >/etc/systemd/system/crowsnest.service <<'EOF'
 [Unit]
-Description=Crowsnest Camera Manager
+Description=Crowsnest Camera Service
 After=network-online.target
-Wants=network-online.target
 
 [Service]
 Type=simple
@@ -70,5 +76,10 @@ WantedBy=multi-user.target
 EOF
 
 ln -sf /etc/systemd/system/crowsnest.service /etc/systemd/system/multi-user.target.wants/crowsnest.service || true
-systemctl_if_exists daemon-reload || true
+
+# Soft reload if systemd is usable (okay if it isn't in chroot)
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+fi
+
 echo_green "[crowsnest] installed"
