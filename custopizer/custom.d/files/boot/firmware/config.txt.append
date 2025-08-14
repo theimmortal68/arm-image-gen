@@ -1,0 +1,2 @@
+# Ensure KMS overlay for libcamera stack on Raspberry Pi
+dtoverlay=vc4-kms-v3d
