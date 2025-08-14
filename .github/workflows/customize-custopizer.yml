@@ -139,13 +139,13 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
-          # Use the CustoPiZer container to do the mounts (needs --privileged)
+          # Fix sudo/su ownership & setuid *inside* the image before CustoPiZer runs
           docker run --rm --privileged \
             -v "${GITHUB_WORKSPACE}/build/input.img:/image.img" \
+            --entrypoint /bin/sh \
             ghcr.io/octoprint/custopizer:latest \
-            bash -lc '
-              set -euo pipefail
+            -ec '
+              set -eu
               apt-get update
               apt-get install -y kpartx e2fsprogs util-linux
 
@@ -168,11 +168,10 @@ jobs:
               mkdir -p /mnt/rootfs
               mount "$ROOTP" /mnt/rootfs
 
-              chown 0:0 /mnt/rootfs/usr/bin/sudo         || true
-              chmod 4755 /mnt/rootfs/usr/bin/sudo        || true
-              chown 0:0 /mnt/rootfs/etc/sudo.conf        || true
-              chown 0:0 /mnt/rootfs/etc/sudoers          || true
-              chmod 0440 /mnt/rootfs/etc/sudoers         || true
+              chown 0:0 /mnt/rootfs/usr/bin/sudo  || true
+              chmod 4755 /mnt/rootfs/usr/bin/sudo || true
+              chown 0:0 /mnt/rootfs/etc/sudo.conf /mnt/rootfs/etc/sudoers || true
+              chmod 0440 /mnt/rootfs/etc/sudoers  || true
               for su in /mnt/rootfs/bin/su /mnt/rootfs/usr/bin/su; do
                 [ -e "$su" ] && { chown 0:0 "$su" || true; chmod 4755 "$su" || true; }
               done
@@ -181,7 +180,7 @@ jobs:
               kpartx -dv "$LOOP"
               losetup -d "$LOOP"
             '
-    
+
       - name: Run CustoPiZer (raw docker, explicit DNS)
         shell: bash
         run: |
