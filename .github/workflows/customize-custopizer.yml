@@ -41,58 +41,22 @@ jobs:
           test -d scripts
           chmod -R a+rx scripts
 
-      # ---- Download the base artifact from the other workflow run ----
-      # Case 1: triggered by workflow_run (preferred path for chaining)
-      - name: Download artifact from triggering base run (no unzip)
-        if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
-        uses: dawidd6/action-download-artifact@v6
+      - name: Download base artifact by ID
+        uses: actions/download-artifact@v5
         with:
-          # keep your existing selector(s) here (run_id / workflow / branch / etc)
-          run_id: ${{ github.event.workflow_run.id }}
-          # download by REGEX so either "base-input-rpi64" or "base-input-rpi64.img.xz" works
-          name: ^base-input-${{ env.DEVICE }}(\.img(\.xz)?|\.zip)?$
-          name_is_regexp: true
-          search_artifacts: true
-          path: build
-          skip_unpack: true
-
-      # Case 2: manual dispatch with specific run id
-      - name: Download artifact from specific run (manual, no unzip)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.base_run_id != '' }}
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          # keep your existing selector(s) here (run_id / workflow / branch / etc)
-          run_id: ${{ github.event.workflow_run.id }}
-          # download by REGEX so either "base-input-rpi64" or "base-input-rpi64.img.xz" works
-          name: ^base-input-${{ env.DEVICE }}(\.img(\.xz)?|\.zip)?$
-          name_is_regexp: true
-          search_artifacts: true
-          path: build
-          skip_unpack: true
-
-      # Case 3: manual dispatch without run id -> fetch the latest successful artifact
-      - name: Download latest successful artifact (manual fallback, no unzip)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.base_run_id == '' }}
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          # keep your existing selector(s) here (run_id / workflow / branch / etc)
-          run_id: ${{ github.event.workflow_run.id }}
-          # download by REGEX so either "base-input-rpi64" or "base-input-rpi64.img.xz" works
-          name: ^base-input-${{ env.DEVICE }}(\.img(\.xz)?|\.zip)?$
-          name_is_regexp: true
-          search_artifacts: true
-          path: build
-          skip_unpack: true
-
-      - name: Extract artifact safely (handles >2GiB)
-        shell: bash
-        run: |
-          set -eux
-          ls -l build || true
-          ZIP="$(find build -maxdepth 1 -type f -name '*.zip' | head -n1 || true)"
-          if [[ -z "${ZIP}" ]]; then
-            echo "No ZIP artifact found in build/"; exit 1
-          fi
+          run-id: 16973650101           # from your URL
+          artifact-ids: 3768162874      # from your URL
+          path: build                   # files will appear here (already extracted)
+    
+      # - name: Extract artifact safely (handles >2GiB)
+      #   shell: bash
+      #   run: |
+      #     set -eux
+      #     ls -l build || true
+      #     ZIP="$(find build -maxdepth 1 -type f -name '*.zip' | head -n1 || true)"
+      #     if [[ -z "${ZIP}" ]]; then
+      #       echo "No ZIP artifact found in build/"; exit 1
+      #     fi
 
           sudo apt-get update
           # Try unzip; if not present or fails on big files, fall back to 7z
