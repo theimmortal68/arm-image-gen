@@ -126,6 +126,27 @@ jobs:
           set -eux
           docker pull ghcr.io/octoprint/custopizer:latest
 
+      - name: Sanitize CustoPiZer scripts (no sudo in chroot)
+        shell: bash
+        run: |
+          set -eux
+          test -d scripts
+          # Replace common sudo patterns with chroot-safe equivalents
+          for f in scripts/*.sh; do
+            # Skip non-regular files
+            [ -f "$f" ] || continue
+            sed -i \
+              -e 's/sudo[[:space:]]\+-u[[:space:]]\+pi[[:space:]]\+/runuser -u pi -- /g' \
+              -e 's/\bsudo[[:space:]]\+apt-get\b/apt-get/g' \
+              -e 's/\bsudo[[:space:]]\+apt\b/apt/g' \
+              -e 's/\bsudo[[:space:]]\+systemctl\b/systemctl/g' \
+              -e 's/\bsudo[[:space:]]\+chown\b/chown/g' \
+              "$f"
+            # Drop any lingering attempts to install policykit-1 in chroot
+            sed -i -e '/apt-get[[:space:]]\+-y[[:space:]]\+install[[:space:]]\+policykit-1/d' "$f" || true
+          done
+          chmod -R a+rx scripts
+
       - name: Run CustoPiZer (raw docker, explicit DNS)
         shell: bash
         run: |
