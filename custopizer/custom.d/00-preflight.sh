@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euox pipefail
+export LC_ALL=C
+source /common.sh; install_cleanup_trap
 
 echo "[preflight] arch: $(uname -m)  dpkg-arch: $(dpkg --print-architecture || true)"
 echo "[preflight] PATH: $PATH"
