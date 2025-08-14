@@ -188,7 +188,7 @@ jobs:
           docker run --rm --privileged \
             --dns 8.8.8.8 --dns 1.1.1.1 \
             -v "${GITHUB_WORKSPACE}/build:/CustoPiZer/workspace" \
-            -v "${GITHUB_WORKSPACE}/scripts:/CustoPiZer/workspace/scripts" \
+            -v "${GITHUB_WORKSPACE}/custopizer/custom.d:/CustoPiZer/workspace/scripts" \
             -v "${GITHUB_WORKSPACE}/config.local:/CustoPiZer/config.local" \
             ghcr.io/octoprint/custopizer:latest
 
