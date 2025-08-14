@@ -1,6 +1,5 @@
 #!/bin/bash
-set -x
-set -e
+set -euox pipefail
 export LC_ALL=C
 source /common.sh; install_cleanup_trap
 
