@@ -1,10 +1,17 @@
 ---
 mmdebstrap:
   suite: bookworm
-  components: [main, contrib, non-free, non-free-firmware]
-  architectures: [arm64]
+  components:
+    - main
+    - contrib
+    - non-free
+    - non-free-firmware
+  architectures:
+    - arm64
   variant: apt
   format: directory
+
+  # Install base tooling *inside the chroot* so later CustoPiZer steps work offline-ish.
   packages:
     - ca-certificates
     - curl
@@ -27,13 +34,13 @@ mmdebstrap:
     - libusb-1.0-0-dev
     - libncurses-dev
     - debian-archive-keyring
-    - locales
-    - tzdata
-    - netbase
+    # Optional: silence “install arch-test” nudge and help cross-arch checks
+    - arch-test
 
+  # Run *before* unpacking the rest: block services from starting in chroot
   setup-hooks:
     - |
-      set -e
+      set -eu
       install -d "$1/usr/sbin"
       cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
       #!/bin/sh
@@ -41,16 +48,14 @@ mmdebstrap:
       EOS
       chmod +x "$1/usr/sbin/policy-rc.d"
 
+  # Small apt hardening for CI networks (kept very minimal)
+  customize-hooks:
+    - |
+      set -eu
       install -d "$1/etc/apt/apt.conf.d"
       cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
       Acquire::ForceIPv4 "true";
       Acquire::Retries "5";
       Acquire::http::Timeout "30";
       Acquire::https::Timeout "30";
-      Acquire::Languages "none";
       EOF
-
-  customize-hooks:
-    - |
-      set -e
-      : # (reserved for future post-install tweaks)
