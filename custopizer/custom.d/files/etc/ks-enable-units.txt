@@ -1,3 +1,4 @@
+# Units to enable at 99-enable-units.sh (one per line)
 klipper.service
 moonraker.service
 crowsnest.service
