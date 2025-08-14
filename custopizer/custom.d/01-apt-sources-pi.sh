@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euox pipefail
+export LC_ALL=C
+source /common.sh; install_cleanup_trap
+
 export DEBIAN_FRONTEND=noninteractive
 
 # Raspberry Pi repository for Bookworm
