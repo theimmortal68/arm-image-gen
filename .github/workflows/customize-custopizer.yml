@@ -122,6 +122,19 @@ jobs:
           done
           chmod -R a+rx scripts
 
+      - name: Select config.local for device
+        shell: bash
+        run: |
+          set -euxo pipefail
+          case "${DEVICE:-rpi64}" in
+            rpi*|raspberrypi*) src=".github/custopizer/config.rpi64" ;;
+            orangepi*|opi*)    src=".github/custopizer/config.orangepi" ;;
+            *)                 src=".github/custopizer/config.rpi64" ;;  # default
+          esac
+          cp "$src" config.local
+          echo "Using $(basename "$src"):"
+          sed 's/^/  /' config.local
+    
       - name: Run CustoPiZer (raw docker, explicit DNS)
         shell: bash
         run: |
