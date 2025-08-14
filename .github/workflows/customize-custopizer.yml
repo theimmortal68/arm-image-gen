@@ -89,10 +89,6 @@ jobs:
             SRC="${SRC%.xz}"
           fi
 
-          mkdir -p build
-          mv -f "${SRC}" "build/input-${DEVICE}.img"
-          ls -lh build
-
       - name: Prepare workspace & rename to input.img
         shell: bash
         run: |
