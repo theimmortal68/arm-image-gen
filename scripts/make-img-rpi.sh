@@ -40,12 +40,22 @@ sudo mount "${LOOP}p2" /mnt/imgroot
 sudo mkdir -p /mnt/imgroot/boot/firmware
 sudo mount "${LOOP}p1" /mnt/imgroot/boot/firmware
 
-# Copy rootfs (preserve numeric ids; be permissive with ownership if needed)
-sudo rsync -aHAX --numeric-ids --inplace \
-  --info=progress2 \
-  --exclude='/dev/*' --exclude='/proc/*' --exclude='/sys/*' --exclude='/tmp/*' \
-  --exclude='/run/*' --exclude='/mnt/*' --exclude='/media/*' --exclude='/lost+found' \
-  "$ROOTFS_DIR"/ /mnt/imgroot/
+# ---- copy rootfs (ext4 supports ownership/xattrs) ----
+# Full fidelity; if your runner ever balks at xattrs/ACLs, the fallback keeps going.
+if ! rsync -aHAX --numeric-ids --delete \
+  --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
+  "$ROOTFS/"/ "$MNT_ROOT/"/; then
+  # Fallback without xattrs/ACLs if environment lacks support
+  rsync -rltD --delete --numeric-ids \
+    --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
+    "$ROOTFS/"/ "$MNT_ROOT/"/
+fi
+
+# ---- copy boot/firmware (vfat: no ownership) ----
+# Do NOT try to set owner/group on vfat; set reasonable perms instead.
+rsync -rlt --delete --no-owner --no-group \
+  --chmod=Du+rwX,Fu+rw,Da+rx,Fa+rX \
+  "$ROOTFS/boot/firmware/"/ "$MNT_BOOT/"/
 
 # Ensure boot files exist (your bdebstrap layer writes these already)
 sudo sync
