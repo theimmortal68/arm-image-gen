@@ -6,6 +6,7 @@ source /common.sh; install_cleanup_trap
 # Where to read the list (first hit wins)
 # Recommended: ship /etc/ks-enable-units.txt from an earlier script
 CANDIDATES=(
+  "/files/etc/ks-enable-units.txt"   # highest priority
   "/etc/ks-enable-units.txt"
   "/root/enable-units.txt"
   "/opt/enable-units.txt"
