@@ -30,7 +30,7 @@ mmdebstrap:
     - tzdata
     - netbase
 
-  setup-hook:
+  setup-hooks:
     - |
       set -e
       install -d "$1/usr/sbin"
@@ -49,7 +49,7 @@ mmdebstrap:
       Acquire::Languages "none";
       EOF
 
-  customize-hook:
+  customize-hooks:
     - |
       set -e
       : # (reserved for future post-install tweaks)
