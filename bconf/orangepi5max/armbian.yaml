@@ -1,20 +1,21 @@
 ---
-# Add Armbian apt repo + key; kernel packages are board-specific and usually handled by Armbian images.
-customize-hook:
-  - |
-    set -eu
-    install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d"
-    curl -fsSL https://apt.armbian.com/armbian.key | gpg --dearmor -o "$1/usr/share/keyrings/armbian-archive-keyring.gpg"
-    chmod 0644 "$1/usr/share/keyrings/armbian-archive-keyring.gpg"
+mmdebstrap:
+  # Add Armbian apt repo + key; kernel packages are board-specific and usually handled by Armbian images.
+  customize-hook:
+    - |
+      set -eu
+      install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d"
+      curl -fsSL https://apt.armbian.com/armbian.key | gpg --dearmor -o "$1/usr/share/keyrings/armbian-archive-keyring.gpg"
+      chmod 0644 "$1/usr/share/keyrings/armbian-archive-keyring.gpg"
 
-    cat > "$1/etc/apt/sources.list.d/armbian.list" <<'EOF'
-    deb [signed-by=/usr/share/keyrings/armbian-archive-keyring.gpg] http://apt.armbian.com bookworm main utils desktop
-    EOF
+      cat > "$1/etc/apt/sources.list.d/armbian.list" <<'EOF'
+      deb [signed-by=/usr/share/keyrings/armbian-archive-keyring.gpg] http://apt.armbian.com bookworm main utils desktop
+      EOF
 
-    # Keep a place-holder install that won't fail if packages vary by board
-    chroot "$1" bash -euo pipefail <<'EOSH'
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    # Firmware package is generic; kernel/uboot are highly board-specific and left to device-specific scripts/images
-    apt-get install -y armbian-firmware || true
-    EOSH
+      # Keep a place-holder install that won't fail if packages vary by board
+      chroot "$1" bash -euo pipefail <<'EOSH'
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      # Firmware package is generic; kernel/uboot are highly board-specific and left to device-specific scripts/images
+      apt-get install -y armbian-firmware || true
+      EOSH
