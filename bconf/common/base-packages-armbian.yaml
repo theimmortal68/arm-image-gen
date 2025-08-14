@@ -1,10 +1,16 @@
 ---
 mmdebstrap:
   suite: bookworm
-  components: [main, contrib, non-free, non-free-firmware]
-  architectures: [arm64]
+  components:
+    - main
+    - contrib
+    - non-free
+    - non-free-firmware
+  architectures:
+    - arm64
   variant: apt
   format: directory
+
   packages:
     - ca-certificates
     - curl
@@ -29,27 +35,24 @@ mmdebstrap:
     - locales
     - tzdata
     - netbase
+    - arch-test   # optional: quiets foreign-arch checks inside chroot
 
   setup-hooks:
     - |
-      set -e
+      set -eu
+      # block services from starting in chroot
       install -d "$1/usr/sbin"
-      cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
-      #!/bin/sh
-      exit 101
-      EOS
+      printf '#!/bin/sh\nexit 101\n' > "$1/usr/sbin/policy-rc.d"
       chmod +x "$1/usr/sbin/policy-rc.d"
 
+  customize-hooks:
+    - |
+      set -eu
+      # small apt hardening for CI
       install -d "$1/etc/apt/apt.conf.d"
       cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
       Acquire::ForceIPv4 "true";
       Acquire::Retries "5";
       Acquire::http::Timeout "30";
       Acquire::https::Timeout "30";
-      Acquire::Languages "none";
       EOF
-
-  customize-hooks:
-    - |
-      set -e
-      : # (reserved for future post-install tweaks)
