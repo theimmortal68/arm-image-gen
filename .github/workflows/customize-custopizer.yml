@@ -134,6 +134,53 @@ jobs:
           cp "$src" config.local
           echo "Using $(basename "$src"):"
           sed 's/^/  /' config.local
+
+      - name: Pre-fix sudo perms inside input.img (non-interactive)
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          # Use the CustoPiZer container to do the mounts (needs --privileged)
+          docker run --rm --privileged \
+            -v "${GITHUB_WORKSPACE}/build/input.img:/image.img" \
+            ghcr.io/octoprint/custopizer:latest \
+            bash -lc '
+              set -euo pipefail
+              apt-get update
+              apt-get install -y kpartx e2fsprogs util-linux
+
+              LOOP=$(losetup -Pf --show /image.img)
+              partprobe "$LOOP" || true
+              kpartx -av "$LOOP"
+
+              MAP=$(basename "$LOOP")
+              ROOTP=""
+              if [ -e "/dev/mapper/${MAP}p2" ]; then
+                ROOTP="/dev/mapper/${MAP}p2"
+              else
+                for p in /dev/mapper/${MAP}p*; do
+                  [ -e "$p" ] || continue
+                  if lsblk -no FSTYPE "$p" 2>/dev/null | grep -q "^ext4$"; then ROOTP="$p"; break; fi
+                done
+              fi
+              [ -n "$ROOTP" ]
+
+              mkdir -p /mnt/rootfs
+              mount "$ROOTP" /mnt/rootfs
+
+              chown 0:0 /mnt/rootfs/usr/bin/sudo         || true
+              chmod 4755 /mnt/rootfs/usr/bin/sudo        || true
+              chown 0:0 /mnt/rootfs/etc/sudo.conf        || true
+              chown 0:0 /mnt/rootfs/etc/sudoers          || true
+              chmod 0440 /mnt/rootfs/etc/sudoers         || true
+              for su in /mnt/rootfs/bin/su /mnt/rootfs/usr/bin/su; do
+                [ -e "$su" ] && { chown 0:0 "$su" || true; chmod 4755 "$su" || true; }
+              done
+
+              umount /mnt/rootfs
+              kpartx -dv "$LOOP"
+              losetup -d "$LOOP"
+            '
     
       - name: Run CustoPiZer (raw docker, explicit DNS)
         shell: bash
