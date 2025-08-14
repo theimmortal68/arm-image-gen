@@ -11,7 +11,7 @@ mmdebstrap:
   variant: apt
   format: directory
 
-  # Install base tooling *inside the chroot* so later CustoPiZer steps work offline-ish.
+  # Base tooling inside the chroot so later customization steps have what they need.
   packages:
     - ca-certificates
     - curl
@@ -34,21 +34,43 @@ mmdebstrap:
     - libusb-1.0-0-dev
     - libncurses-dev
     - debian-archive-keyring
-    # Optional: silence “install arch-test” nudge and help cross-arch checks
-    - arch-test
+    - locales
+    - tzdata
+    - netbase
+    - arch-test   # optional: quiets foreign-arch checks inside chroot
 
-  # Run *before* unpacking the rest: block services from starting in chroot
+  # Runs before apt’s first transactions: block service starts, seed Debian keyring.
   setup-hooks:
     - |
       set -eu
-      install -d "$1/usr/sbin"
+      install -d "$1/usr/sbin" "$1/usr/share/keyrings" "$1/etc/apt/trusted.gpg.d"
+
+      # Block services inside chroot (CustoPiZer will re-enable later)
       cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
       #!/bin/sh
       exit 101
       EOS
       chmod +x "$1/usr/sbin/policy-rc.d"
 
-  # Small apt hardening for CI networks (kept very minimal)
+      # Seed Debian archive key so apt can verify Release files during bootstrap
+      if [ -s /usr/share/keyrings/debian-archive-keyring.gpg ]; then
+        cp -a /usr/share/keyrings/debian-archive-keyring.gpg "$1/usr/share/keyrings/"
+      else
+        tmpdir="$(mktemp -d)"; trap 'rm -rf "$tmpdir"' EXIT
+        curl -fsSL https://ftp-master.debian.org/keys/archive-key-12.asc \
+          -o "$tmpdir/archive-key-12.asc"
+        curl -fsSL https://ftp-master.debian.org/keys/archive-key-12-security.asc \
+          -o "$tmpdir/archive-key-12-security.asc"
+        cat "$tmpdir"/archive-key-12*.asc | gpg --dearmor > \
+          "$1/usr/share/keyrings/debian-archive-keyring.gpg"
+      fi
+      chmod 0644 "$1/usr/share/keyrings/debian-archive-keyring.gpg"
+
+      # Also place into trusted.gpg.d so apt trusts it immediately (no signed-by needed)
+      cp -a "$1/usr/share/keyrings/debian-archive-keyring.gpg" \
+            "$1/etc/apt/trusted.gpg.d/debian-archive-keyring.gpg" || true
+
+  # Small apt hardening for CI networks.
   customize-hooks:
     - |
       set -eu
@@ -58,4 +80,6 @@ mmdebstrap:
       Acquire::Retries "5";
       Acquire::http::Timeout "30";
       Acquire::https::Timeout "30";
+      Acquire::Languages "none";
       EOF
+```0
