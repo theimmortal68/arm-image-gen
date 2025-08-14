@@ -58,15 +58,15 @@ jobs:
       #       echo "No ZIP artifact found in build/"; exit 1
       #     fi
 
-          sudo apt-get update
-          # Try unzip; if not present or fails on big files, fall back to 7z
-          if sudo apt-get install -y unzip; then
-            unzip -o "${ZIP}" -d build || { sudo apt-get install -y p7zip-full; 7z x -y -o"build" "${ZIP}"; }
-          else
-            sudo apt-get install -y p7zip-full
-            7z x -y -o"build" "${ZIP}"
-          fi
-          ls -l build
+          # sudo apt-get update
+          # # Try unzip; if not present or fails on big files, fall back to 7z
+          # if sudo apt-get install -y unzip; then
+          #   unzip -o "${ZIP}" -d build || { sudo apt-get install -y p7zip-full; 7z x -y -o"build" "${ZIP}"; }
+          # else
+          #   sudo apt-get install -y p7zip-full
+          #   7z x -y -o"build" "${ZIP}"
+          # fi
+          # ls -l build
 
       - name: Normalize image path (supports .img and .img.xz)
         shell: bash
