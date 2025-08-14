@@ -3,3 +3,61 @@ mmdebstrap:
   packages:
     - network-manager
     - openssh-server
+  customize-hooks:
+    - |
+      set -eu
+      # 1) Build-time resolv.conf so chroots have working DNS
+      rm -f "$1/etc/resolv.conf"
+      install -d "$1/etc"
+      cat >"$1/etc/resolv.conf" <<'EOF'
+      nameserver 8.8.8.8
+      nameserver 1.1.1.1
+      nameserver 8.8.4.4
+      options timeout:2 attempts:3
+      EOF
+      chmod 0644 "$1/etc/resolv.conf"
+
+      # Helpful apt robustness (safe to repeat even if you already add this elsewhere)
+      install -d "$1/etc/apt/apt.conf.d"
+      cat >"$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
+      Acquire::ForceIPv4 "true";
+      Acquire::Retries "5";
+      Acquire::http::Timeout "30";
+      Acquire::https::Timeout "30";
+      EOF
+
+      # 2) First-boot: restore systemd-resolved’s symlink if available
+      install -d "$1/usr/local/sbin" "$1/etc/systemd/system"
+      cat >"$1/usr/local/sbin/restore-resolvconf.sh" <<'EOS'
+      #!/bin/sh
+      set -eu
+      # If systemd-resolved is present at runtime, use its generated resolv.conf
+      if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled systemd-resolved.service >/dev/null 2>&1; then
+        if [ -f /run/systemd/resolve/resolv.conf ]; then
+          ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+        elif [ -f /run/systemd/resolve/stub-resolv.conf ]; then
+          ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+        fi
+      fi
+      exit 0
+      EOS
+      chmod 0755 "$1/usr/local/sbin/restore-resolvconf.sh"
+
+      cat >"$1/etc/systemd/system/restore-resolvconf.service" <<'EOS'
+      [Unit]
+      Description=Restore systemd-resolved symlink for /etc/resolv.conf
+      DefaultDependencies=no
+      After=network-pre.target
+      Before=network.target multi-user.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/restore-resolvconf.sh
+      RemainAfterExit=no
+
+      [Install]
+      WantedBy=multi-user.target
+      EOS
+
+    # Enable the oneshot for first boot; safe even though services won't start in chroot
+    - $BDEBSTRAP_HOOKS/enable-units "$1" restore-resolvconf
