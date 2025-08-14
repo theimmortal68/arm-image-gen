@@ -5,3 +5,39 @@ mmdebstrap:
   architectures: [arm64]
   variant: apt
   format: directory
+  setup-hooks:
+    - |
+      set -e
+      # Ensure keyring dirs exist
+      install -d "$1/usr/share/keyrings" "$1/etc/apt/trusted.gpg.d"
+
+      # Prefer host keyring if present (Ubuntu runners usually have it)
+      if [ -f /usr/share/keyrings/debian-archive-keyring.gpg ]; then
+        cp -a /usr/share/keyrings/debian-archive-keyring.gpg "$1/usr/share/keyrings/"
+        cp -a /usr/share/keyrings/debian-archive-removed-keys.gpg "$1/usr/share/keyrings/" 2>/dev/null || true
+      else
+        # Fallback: fetch Bookworm (Debian 12) archive keys directly and dearmor
+        curl -fsSL https://ftp-master.debian.org/keys/archive-key-12.asc \
+          | gpg --dearmor -o "$1/usr/share/keyrings/debian-archive-keyring.gpg"
+        curl -fsSL https://ftp-master.debian.org/keys/security-archive-key-12.asc \
+          | gpg --dearmor -o "$1/usr/share/keyrings/debian-archive-removed-keys.gpg"
+      fi
+      chmod 0644 "$1/usr/share/keyrings/"*.gpg || true
+
+      # Make them visible to apt immediately (for sources without Signed-By)
+      cp -a "$1/usr/share/keyrings/debian-archive-keyring.gpg" \
+            "$1/etc/apt/trusted.gpg.d/debian-archive-keyring.gpg"
+      cp -a "$1/usr/share/keyrings/debian-archive-removed-keys.gpg" \
+            "$1/etc/apt/trusted.gpg.d/debian-archive-removed-keys.gpg" 2>/dev/null || true
+
+      # (Optional but nice-to-have net tuning + no service start, keep if you already had them)
+      install -d "$1/usr/sbin" "$1/etc/apt/apt.conf.d"
+      printf '#!/bin/sh\nexit 101\n' > "$1/usr/sbin/policy-rc.d"
+      chmod +x "$1/usr/sbin/policy-rc.d"
+      cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
+      Acquire::ForceIPv4 "true";
+      Acquire::Retries "5";
+      Acquire::http::Timeout "30";
+      Acquire::https::Timeout "30";
+      Acquire::Languages "none";
+      EOF
