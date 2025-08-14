@@ -43,25 +43,27 @@ jobs:
 
       # ---- Download the base artifact from the other workflow run ----
       # Case 1: triggered by workflow_run (preferred path for chaining)
-      - name: Download artifact from triggering base run
+      - name: Download artifact from triggering base run (no unzip)
         if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
         uses: dawidd6/action-download-artifact@v6
         with:
           run_id: ${{ github.event.workflow_run.id }}
           name: base-input-${{ env.DEVICE }}
           path: build
+          skip_unpack: true
 
       # Case 2: manual dispatch with specific run id
-      - name: Download artifact from specific run (manual)
+      - name: Download artifact from specific run (manual, no unzip)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.base_run_id != '' }}
         uses: dawidd6/action-download-artifact@v6
         with:
           run_id: ${{ inputs.base_run_id }}
           name: base-input-${{ env.DEVICE }}
           path: build
+          skip_unpack: true
 
       # Case 3: manual dispatch without run id -> fetch the latest successful artifact
-      - name: Download latest successful artifact (manual fallback)
+      - name: Download latest successful artifact (manual fallback, no unzip)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.base_run_id == '' }}
         uses: dawidd6/action-download-artifact@v6
         with:
@@ -70,25 +72,44 @@ jobs:
           name: base-input-${{ env.DEVICE }}
           path: build
           branch: ${{ github.ref_name }}
+          skip_unpack: true
 
-      - name: Verify artifact
+      - name: Extract artifact safely (handles >2GiB)
         shell: bash
         run: |
           set -eux
           ls -l build
-          # dawidd6/action-download-artifact extracts to a folder; normalize
-          if [[ -d "build/base-input-${DEVICE}" ]]; then
-            mv "build/base-input-${DEVICE}/input-${DEVICE}.img" "build/input-${DEVICE}.img" || true
+          ZIP="$(find build -maxdepth 1 -type f -name '*.zip' | head -n1)"
+          if [[ -z "${ZIP}" ]]; then
+            echo "No ZIP artifact found in build/"; exit 1
           fi
-          # Also try typical extraction path when artifact is a single file
-          if [[ -f "build/input-${DEVICE}.img" ]]; then
-            :
-          elif [[ -f "build/input-${DEVICE}.img/input-${DEVICE}.img" ]]; then
-            mv "build/input-${DEVICE}.img/input-${DEVICE}.img" "build/input-${DEVICE}.img"
-          elif [[ -f "build/base-input-${DEVICE}.img" ]]; then
-            mv "build/base-input-${DEVICE}.img" "build/input-${DEVICE}.img"
+
+          sudo apt-get update
+          sudo apt-get install -y unzip || sudo apt-get install -y p7zip-full
+
+          # Prefer unzip; fallback to 7z
+          if unzip -o "${ZIP}" -d build; then
+            true
+          else
+            7z x -y -o"build" "${ZIP}"
           fi
-          test -s "build/input-${DEVICE}.img"
+          ls -l build
+
+      - name: Normalize extracted image path
+        shell: bash
+        run: |
+          set -eux
+          # Find the first matching input-*.img anywhere under build/ (depth 3 to be safe)
+          IMG_SRC="$(find build -maxdepth 3 -type f -name "input-${DEVICE}.img" -o -name "input-*.img" | head -n1 || true)"
+          if [[ -z "${IMG_SRC}" ]]; then
+            # Some uploads keep original relative path (e.g. build/input-*.img inside zip)
+            IMG_SRC="$(find build -maxdepth 4 -type f -name "*.img" | head -n1 || true)"
+          fi
+          test -n "${IMG_SRC}" || (echo "No .img found after extraction" && exit 1)
+
+          mkdir -p build
+          mv -f "${IMG_SRC}" "build/input-${DEVICE}.img"
+          ls -lh build
 
       - name: Create CustoPiZer config.local
         shell: bash
@@ -131,9 +152,7 @@ jobs:
         run: |
           set -eux
           test -d scripts
-          # Replace common sudo patterns with chroot-safe equivalents
           for f in scripts/*.sh; do
-            # Skip non-regular files
             [ -f "$f" ] || continue
             sed -i \
               -e 's/sudo[[:space:]]\+-u[[:space:]]\+pi[[:space:]]\+/runuser -u pi -- /g' \
@@ -142,7 +161,6 @@ jobs:
               -e 's/\bsudo[[:space:]]\+systemctl\b/systemctl/g' \
               -e 's/\bsudo[[:space:]]\+chown\b/chown/g' \
               "$f"
-            # Drop any lingering attempts to install policykit-1 in chroot
             sed -i -e '/apt-get[[:space:]]\+-y[[:space:]]\+install[[:space:]]\+policykit-1/d' "$f" || true
           done
           chmod -R a+rx scripts
