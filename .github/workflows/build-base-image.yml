@@ -87,6 +87,14 @@ jobs:
       #   run: |
       #     echo "TODO: add orange pi image builder"; exit 1
 
+      - name: Make build dir writable by runner
+        run: |
+          sudo chown -R "$USER:$(id -gn)" build || true
+          sudo find build -type d -exec chmod u+rwx {} +
+          # if an old .xz exists and is root-owned, remove it
+          [ -f "build/input-${{ env.DEVICE }}.img.xz" ] && \
+            ( rm -f "build/input-${{ env.DEVICE }}.img.xz" || sudo rm -f "build/input-${{ env.DEVICE }}.img.xz" ) || true
+
       - name: Compress base image
         run: |
           set -eux
