@@ -31,26 +31,26 @@ mmdebstrap:
     - tzdata
     - netbase
 
-setup-hook:
-  - |
-    set -e
-    install -d "$1/usr/sbin"
-    cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
-    #!/bin/sh
-    exit 101
-    EOS
-    chmod +x "$1/usr/sbin/policy-rc.d"
+  setup-hook:
+    - |
+      set -e
+      install -d "$1/usr/sbin"
+      cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
+      #!/bin/sh
+      exit 101
+      EOS
+      chmod +x "$1/usr/sbin/policy-rc.d"
 
-    install -d "$1/etc/apt/apt.conf.d"
-    cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
-    Acquire::ForceIPv4 "true";
-    Acquire::Retries "5";
-    Acquire::http::Timeout "30";
-    Acquire::https::Timeout "30";
-    Acquire::Languages "none";
-    EOF
+      install -d "$1/etc/apt/apt.conf.d"
+      cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
+      Acquire::ForceIPv4 "true";
+      Acquire::Retries "5";
+      Acquire::http::Timeout "30";
+      Acquire::https::Timeout "30";
+      Acquire::Languages "none";
+      EOF
 
-customize-hook:
-  - |
-    set -e
-    : # (reserved for future post-install tweaks)
+  customize-hook:
+    - |
+      set -e
+      : # (reserved for future post-install tweaks)
