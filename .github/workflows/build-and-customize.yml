@@ -44,7 +44,7 @@ jobs:
             ca-certificates curl wget jq git unzip rsync \
             parted dosfstools e2fsprogs kpartx xz-utils \
             util-linux udev mount kmod file perl python3-pip \
-            debian-archive-keyring
+            debian-archive-keyring docker.io
 
           sudo update-binfmts --enable qemu-aarch64 || true
           sudo update-binfmts --enable qemu-arm || true
@@ -86,7 +86,7 @@ jobs:
       #   run: |
       #     echo "TODO: add orange pi image builder (u-boot/extlinux)"; exit 1
 
-      # --- CustoPiZer integration (official Action) ---
+      # --- CustoPiZer (RAW DOCKER) with explicit DNS and proper script mount ---
       - name: Create CustoPiZer config.local
         shell: bash
         run: |
@@ -130,19 +130,34 @@ jobs:
         run: |
           set -eux
           sudo rm -f build/input.img || true
-          # If your image was created with a device suffix, normalize it:
           if [[ -f "build/input-${DEVICE}.img" ]]; then
             sudo chown "$USER":"$USER" "build/input-${DEVICE}.img"
             mv -f "build/input-${DEVICE}.img" "build/input.img"
           fi
           test -s build/input.img
 
-      - name: Run CustoPiZer (official Action)
-        uses: OctoPrint/CustoPiZer@main
-        with:
-          workspace: ${{ github.workspace }}/build     # must contain input.img
-          scripts:  ${{ github.workspace }}/scripts    # your customization scripts
-          config:   ${{ github.workspace }}/config.local
+      - name: Pull CustoPiZer image (for reliability)
+        run: |
+          set -eux
+          docker pull ghcr.io/octoprint/custopizer:latest
+
+      - name: Run CustoPiZer (raw docker with DNS)
+        shell: bash
+        run: |
+          set -eux
+          # Workspace must contain:
+          #   /CustoPiZer/workspace/input.img
+          #   /CustoPiZer/workspace/scripts/  (your repo scripts)
+          docker run --rm --privileged \
+            --dns 8.8.8.8 --dns 1.1.1.1 \
+            -v "${GITHUB_WORKSPACE}/build:/CustoPiZer/workspace" \
+            -v "${GITHUB_WORKSPACE}/scripts:/CustoPiZer/workspace/scripts" \
+            -v "${GITHUB_WORKSPACE}/config.local:/CustoPiZer/config.local" \
+            ghcr.io/octoprint/custopizer:latest
+
+          # Rename output for artifacts
+          mv -f "${GITHUB_WORKSPACE}/build/output.img" \
+                "${GITHUB_WORKSPACE}/build/output-${DEVICE}.img"
 
       - name: Take ownership of output (post-CustoPiZer)
         shell: bash
@@ -150,8 +165,6 @@ jobs:
           set -eux
           sudo chown -R "$USER":"$USER" build
           chmod -R u+rwX build
-          # Rename with device suffix for artifacts
-          mv -f "build/output.img" "build/output-${DEVICE}.img"
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
