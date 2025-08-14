@@ -1,7 +1,7 @@
 ---
 mmdebstrap:
   # Add Armbian apt repo + key; kernel packages are board-specific and usually handled by Armbian images.
-  customize-hook:
+  customize-hooks:
     - |
       set -eu
       install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d"
