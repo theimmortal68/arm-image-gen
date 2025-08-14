@@ -34,4 +34,23 @@ unzip -o "$TMP" -d /tmp/_mainsail_zip
 rsync -a --delete /tmp/_mainsail_zip/ "$HOME_DIR/mainsail/"
 chown -R "$KS_USER:$KS_USER" "$HOME_DIR/mainsail"
 
+# After unzip
+test -s /var/www/mainsail/index.html
+test -d /var/www/mainsail/assets
+
+# Nginx site (if you install nginx)
+install -d /etc/nginx/sites-available /etc/nginx/sites-enabled
+cat >/etc/nginx/sites-available/mainsail <<'NGX'
+server {
+  listen 80 default_server;
+  server_name _;
+  root /var/www/mainsail;
+  index index.html;
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
+NGX
+ln -sf /etc/nginx/sites-available/mainsail /etc/nginx/sites-enabled/mainsail
+
 echo_green "[mainsail] installed to $HOME_DIR/mainsail"
