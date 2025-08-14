@@ -41,32 +41,35 @@ jobs:
           test -d scripts
           chmod -R a+rx scripts
 
-      - name: Download base artifact by ID
-        uses: actions/download-artifact@v5
+      - name: Download artifact from that run (regex match, no unzip)
+        uses: dawidd6/action-download-artifact@v11
         with:
-          run-id: 16973650101           # from your URL
-          artifact-ids: 3768162874      # from your URL
-          path: build                   # files will appear here (already extracted)
+          run_id: 16973650101
+          name: ^base-input-rpi64(\.img(\.xz)?|\.zip)?$  # adjust DEVICE if needed
+          name_is_regexp: true
+          search_artifacts: true
+          path: build
+          skip_unpack: true
     
-      # - name: Extract artifact safely (handles >2GiB)
-      #   shell: bash
-      #   run: |
-      #     set -eux
-      #     ls -l build || true
-      #     ZIP="$(find build -maxdepth 1 -type f -name '*.zip' | head -n1 || true)"
-      #     if [[ -z "${ZIP}" ]]; then
-      #       echo "No ZIP artifact found in build/"; exit 1
-      #     fi
+      - name: Extract artifact safely (handles >2GiB)
+        shell: bash
+        run: |
+          set -eux
+          ls -l build || true
+          ZIP="$(find build -maxdepth 1 -type f -name '*.zip' | head -n1 || true)"
+          if [[ -z "${ZIP}" ]]; then
+            echo "No ZIP artifact found in build/"; exit 1
+          fi
 
-          # sudo apt-get update
-          # # Try unzip; if not present or fails on big files, fall back to 7z
-          # if sudo apt-get install -y unzip; then
-          #   unzip -o "${ZIP}" -d build || { sudo apt-get install -y p7zip-full; 7z x -y -o"build" "${ZIP}"; }
-          # else
-          #   sudo apt-get install -y p7zip-full
-          #   7z x -y -o"build" "${ZIP}"
-          # fi
-          # ls -l build
+          sudo apt-get update
+          # Try unzip; if not present or fails on big files, fall back to 7z
+          if sudo apt-get install -y unzip; then
+            unzip -o "${ZIP}" -d build || { sudo apt-get install -y p7zip-full; 7z x -y -o"build" "${ZIP}"; }
+          else
+            sudo apt-get install -y p7zip-full
+            7z x -y -o"build" "${ZIP}"
+          fi
+          ls -l build
 
       - name: Normalize image path (supports .img and .img.xz)
         shell: bash
