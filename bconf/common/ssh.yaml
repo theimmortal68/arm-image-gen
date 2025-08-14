@@ -1,10 +1,11 @@
 ---
-customize-hook:
-  - |
-    set -e
-    install -d "$1/etc/ssh/sshd_config.d"
-    cat > "$1/etc/ssh/sshd_config.d/10-klipper.conf" <<'EOF'
-    PubkeyAuthentication yes
-    PasswordAuthentication no
-    PermitRootLogin no
-    EOF
+mmdebstrap:
+  customize-hooks:
+    - |
+      set -e
+      install -d "$1/etc/ssh/sshd_config.d"
+      cat > "$1/etc/ssh/sshd_config.d/10-klipper.conf" <<'EOF'
+      PubkeyAuthentication yes
+      PasswordAuthentication no
+      PermitRootLogin no
+      EOF
