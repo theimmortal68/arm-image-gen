@@ -1,0 +1,3 @@
+# Ensure video/media devices are group video, 0660 (non-root apps via 'video' group)
+KERNEL=="video[0-9]*", GROUP="video", MODE="0660"
+KERNEL=="media[0-9]*", GROUP="video", MODE="0660"
