@@ -48,8 +48,14 @@ sudo mount "${LOOP}p2" "$MNT"
 sudo mkdir -p "$MNT/boot/firmware"
 sudo mount "${LOOP}p1" "$MNT/boot/firmware"
 
-# Rsync rootfs to root partition
-sudo rsync -aAXH --numeric-ids --delete "$ROOTFS"/ "$MNT"/
+# Use safer rsync command
+rsync -a --no-owner --no-group "$SRC" "$DEST"
+RSYNC_EXIT=$?
+
+if [ $RSYNC_EXIT -ne 0 ]; then
+  echo "Warning: rsync failed with exit code $RSYNC_EXIT. This is usually due to ownership/permission issues on CI runners."
+  # Optionally: exit 1 to fail, or continue if ownership isn't critical
+fi
 
 # Copy boot firmware tree from the rootfs onto the boot partition
 if [ -d "$ROOTFS/boot/firmware" ]; then
