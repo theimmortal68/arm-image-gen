@@ -174,4 +174,3 @@ fi
 
 sync
 echo "[make-img-rpi] Done: $OUTPUT_IMG"
-```0
