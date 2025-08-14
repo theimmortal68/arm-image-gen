@@ -12,7 +12,7 @@ if [ ! -s "$IN_IMG" ]; then
   exit 1
 fi
 
-docker run --rm \
+docker run --rm --privileged \
   --dns 8.8.8.8 --dns 8.8.4.4 \
   -v "${PWD}:/CustoPiZer/workspace" \
   ghcr.io/octoprint/custopizer:latest \

@@ -21,10 +21,10 @@ if "$VENV/bin/pip" install -U moonraker-timelapse; then
 else
   echo_red "[timelapse] pip package missing, trying git"
   if [ ! -d "$HOME_DIR/moonraker-timelapse/.git" ]; then
-    sudo -u "$KS_USER" git clone --depth=1 https://github.com/mainsail-crew/moonraker-timelapse.git "$HOME_DIR/moonraker-timelapse"
+    runuser -u "$KS_USER" -- git clone --depth=1 https://github.com/mainsail-crew/moonraker-timelapse.git "$HOME_DIR/moonraker-timelapse"
   else
-    sudo -u "$KS_USER" git -C "$HOME_DIR/moonraker-timelapse" fetch --depth=1 origin || true
-    sudo -u "$KS_USER" git -C "$HOME_DIR/moonraker-timelapse" reset --hard origin/master || true
+    runuser -u "$KS_USER" -- git -C "$HOME_DIR/moonraker-timelapse" fetch --depth=1 origin || true
+    runuser -u "$KS_USER" -- git -C "$HOME_DIR/moonraker-timelapse" reset --hard origin/master || true
   fi
   "$VENV/bin/pip" install -U pip wheel setuptools
   "$VENV/bin/pip" install "$HOME_DIR/moonraker-timelapse" || { echo_red "[timelapse] git install failed"; exit 1; }

@@ -17,18 +17,18 @@ is_in_apt python3-venv || { echo_red "[klipper] python3-venv missing"; exit 1; }
 
 # Clone/update Klipper
 if [ ! -d "$HOME_DIR/klipper/.git" ]; then
-  sudo -u "$KS_USER" git clone --depth=1 https://github.com/Klipper3d/klipper.git "$HOME_DIR/klipper"
+  runuser -u "$KS_USER" -- git clone --depth=1 https://github.com/Klipper3d/klipper.git "$HOME_DIR/klipper"
 else
-  sudo -u "$KS_USER" git -C "$HOME_DIR/klipper" fetch --depth=1 origin || true
-  sudo -u "$KS_USER" git -C "$HOME_DIR/klipper" reset --hard origin/master || true
+  runuser -u "$KS_USER" -- git -C "$HOME_DIR/klipper" fetch --depth=1 origin || true
+  runuser -u "$KS_USER" -- git -C "$HOME_DIR/klipper" reset --hard origin/master || true
 fi
 
 # Python venv
 if [ ! -d "$HOME_DIR/klippy-env" ]; then
-  sudo -u "$KS_USER" python3 -m venv "$HOME_DIR/klippy-env"
+  runuser -u "$KS_USER" -- python3 -m venv "$HOME_DIR/klippy-env"
 fi
-sudo -u "$KS_USER" "$HOME_DIR/klippy-env/bin/pip" install -U pip wheel setuptools
-sudo -u "$KS_USER" "$HOME_DIR/klippy-env/bin/pip" install -r "$HOME_DIR/klipper/scripts/klippy-requirements.txt"
+runuser -u "$KS_USER" -- "$HOME_DIR/klippy-env/bin/pip" install -U pip wheel setuptools
+runuser -u "$KS_USER" -- "$HOME_DIR/klippy-env/bin/pip" install -r "$HOME_DIR/klipper/scripts/klippy-requirements.txt"
 
 # Default config
 install -d -o "$KS_USER" -g "$KS_USER" "$HOME_DIR/printer_data/config" "$HOME_DIR/printer_data/logs"

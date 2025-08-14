@@ -21,10 +21,10 @@ if "$VENV/bin/pip" install -U sonar 2>/tmp/sonar.err; then
 else
   echo_red "[sonar] pip package not available, trying git"
   if [ ! -d "$HOME_DIR/sonar/.git" ]; then
-    sudo -u "$KS_USER" git clone --depth=1 https://github.com/mainsail-crew/sonar.git "$HOME_DIR/sonar"
+    runuser -u "$KS_USER" -- git clone --depth=1 https://github.com/mainsail-crew/sonar.git "$HOME_DIR/sonar"
   else
-    sudo -u "$KS_USER" git -C "$HOME_DIR/sonar" fetch --depth=1 origin || true
-    sudo -u "$KS_USER" git -C "$HOME_DIR/sonar" reset --hard origin/master || true
+    runuser -u "$KS_USER" -- git -C "$HOME_DIR/sonar" fetch --depth=1 origin || true
+    runuser -u "$KS_USER" -- git -C "$HOME_DIR/sonar" reset --hard origin/master || true
   fi
   "$VENV/bin/pip" install -U pip wheel setuptools
   "$VENV/bin/pip" install "$HOME_DIR/sonar" || { echo_red "[sonar] git install failed"; cat /tmp/sonar.err || true; exit 1; }

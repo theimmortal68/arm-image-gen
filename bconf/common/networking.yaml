@@ -60,4 +60,4 @@ mmdebstrap:
       EOS
 
       # Enable the oneshot for first boot; safe even though services won't start in chroot
-      chroot "$1" systemctl enable restore-resolvconf.service || true
+ln -sf /etc/systemd/system/restore-resolvconf.service "$1/etc/systemd/system/multi-user.target.wants/restore-resolvconf.service"

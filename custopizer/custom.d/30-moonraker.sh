@@ -15,18 +15,18 @@ is_in_apt python3-venv || { echo_red "[moonraker] python3-venv missing"; exit 1;
 
 # Clone/update Moonraker
 if [ ! -d "$HOME_DIR/moonraker/.git" ]; then
-  sudo -u "$KS_USER" git clone --depth=1 https://github.com/Arksine/moonraker.git "$HOME_DIR/moonraker"
+  runuser -u "$KS_USER" -- git clone --depth=1 https://github.com/Arksine/moonraker.git "$HOME_DIR/moonraker"
 else
-  sudo -u "$KS_USER" git -C "$HOME_DIR/moonraker" fetch --depth=1 origin || true
-  sudo -u "$KS_USER" git -C "$HOME_DIR/moonraker" reset --hard origin/master || true
+  runuser -u "$KS_USER" -- git -C "$HOME_DIR/moonraker" fetch --depth=1 origin || true
+  runuser -u "$KS_USER" -- git -C "$HOME_DIR/moonraker" reset --hard origin/master || true
 fi
 
 # venv
 if [ ! -d "$HOME_DIR/moonraker-env" ]; then
-  sudo -u "$KS_USER" python3 -m venv "$HOME_DIR/moonraker-env"
+  runuser -u "$KS_USER" -- python3 -m venv "$HOME_DIR/moonraker-env"
 fi
-sudo -u "$KS_USER" "$HOME_DIR/moonraker-env/bin/pip" install -U pip wheel setuptools
-sudo -u "$KS_USER" "$HOME_DIR/moonraker-env/bin/pip" install -r "$HOME_DIR/moonraker/scripts/moonraker-requirements.txt"
+runuser -u "$KS_USER" -- "$HOME_DIR/moonraker-env/bin/pip" install -U pip wheel setuptools
+runuser -u "$KS_USER" -- "$HOME_DIR/moonraker-env/bin/pip" install -r "$HOME_DIR/moonraker/scripts/moonraker-requirements.txt"
 
 # moonraker.conf basics
 MOON_CFG="$HOME_DIR/printer_data/config/moonraker.conf"
