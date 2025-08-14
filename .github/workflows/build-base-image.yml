@@ -1,0 +1,104 @@
+name: Build Base Image
+
+on:
+  push:
+    branches: [ master, develop, "**" ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      devices:
+        description: "Comma-separated list of devices (e.g. rpi64,orangepi5max)"
+        required: false
+        default: "rpi64"
+
+concurrency:
+  group: build-base-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJson(format('["{0}"]', (github.event.inputs.devices || 'rpi64'))) }}
+    env:
+      DEVICE: ${{ matrix.device }}
+      ENLARGEROOT: "8000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+
+      - name: Install mmdebstrap (v1.5.7) + bdebstrap + host deps
+        env:
+          MMDEBSTRAP_REF: "1.5.7"   # tag on GitLab (try without/with 'v' prefix)
+          BDEBSTRAP_REF:  "v0.7.0"  # tag or 'main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          MM_TAG="${MMDEBSTRAP_REF:-1.5.7}"
+          BDEB_REF="${BDEBSTRAP_REF:-v0.7.0}"
+
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-user-static binfmt-support pandoc arch-test \
+            ca-certificates curl wget jq git unzip rsync \
+            parted dosfstools e2fsprogs kpartx xz-utils \
+            util-linux udev mount kmod file perl python3-pip \
+            debian-archive-keyring
+
+          sudo update-binfmts --enable qemu-aarch64 || true
+          sudo update-binfmts --enable qemu-arm || true
+          arch-test arm64 || true
+
+          # mmdebstrap (exact tag)
+          rm -rf mmdebstrap-src
+          git clone --depth=1 --branch "${MM_TAG}" \
+            https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src || {
+            git clone --depth=1 --branch "v${MM_TAG}" \
+              https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src
+          }
+          sudo install -D -m 0755 mmdebstrap-src/mmdebstrap /usr/local/bin/mmdebstrap
+          [ -f mmdebstrap-src/mmdebstrap.1 ] && \
+            sudo install -D -m 0644 mmdebstrap-src/mmdebstrap.1 /usr/local/share/man/man1/mmdebstrap.1 || true
+          [ -d mmdebstrap-src/share/mmdebstrap ] && \
+            sudo mkdir -p /usr/local/share/mmdebstrap && \
+            sudo cp -a mmdebstrap-src/share/mmdebstrap/. /usr/local/share/mmdebstrap/ || true
+
+          # bdebstrap
+          python3 -m pip install --user --upgrade pip wheel
+          python3 -m pip install --user "git+https://github.com/bdrung/bdebstrap@${BDEB_REF}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build rootfs with bdebstrap
+        run: |
+          bash scripts/build-bdebstrap.sh "${DEVICE}" "devices/${DEVICE}/layers.yaml" "out/${DEVICE}-bookworm-arm64"
+
+      - name: Make bootable image (Raspberry Pi)
+        if: matrix.device == 'rpi64'
+        run: |
+          sudo bash scripts/make-img-rpi.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
+
+      # Placeholder for other devices:
+      # - name: Make bootable image (Orange Pi 5 Max)
+      #   if: matrix.device == 'orangepi5max'
+      #   run: |
+      #     echo "TODO: add orange pi image builder"; exit 1
+
+      - name: Normalize and upload artifact
+        shell: bash
+        run: |
+          set -eux
+          sudo chown -R "$USER":"$USER" build || true
+          mkdir -p build
+          test -s "build/input-${DEVICE}.img"
+          # Keep per-device name so downstream workflow knows which to fetch
+          ls -lh build/input-${DEVICE}.img
+        # Upload per-device artifact
+      - uses: actions/upload-artifact@v4
+        with:
+          name: base-input-${{ env.DEVICE }}
+          path: build/input-${{ env.DEVICE }}.img
+          if-no-files-found: error
