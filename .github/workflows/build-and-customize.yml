@@ -44,7 +44,7 @@ jobs:
             ca-certificates curl wget jq git unzip rsync \
             parted dosfstools e2fsprogs kpartx xz-utils \
             util-linux udev mount kmod file perl python3-pip \
-            debian-archive-keyring docker.io
+            debian-archive-keyring
 
           sudo update-binfmts --enable qemu-aarch64 || true
           sudo update-binfmts --enable qemu-arm || true
