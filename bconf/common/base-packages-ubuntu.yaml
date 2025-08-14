@@ -1,21 +1,54 @@
 ---
 mmdebstrap:
-  suite: noble            # or jammy if you prefer 22.04
+  suite: noble            # or jammy
+  architectures:
+    - arm64
   components:
     - main
     - restricted
     - universe
     - multiverse
-  architectures:
-    - arm64
   variant: apt
   format: directory
-  # optional: pick a mirror explicitly (helps in CI)
-  # mirrors:
-  #   - http://archive.ubuntu.com/ubuntu
+  # Let mmdebstrap trust Ubuntu’s archive during bootstrap
+  keyrings:
+    - /usr/share/keyrings/ubuntu-archive-keyring.gpg
+  mirrors:
+    - http://ports.ubuntu.com/ubuntu-ports
+
+  setup-hooks:
+    - |
+      set -e
+      # Block service auto-start inside chroot
+      install -d "$1/usr/sbin"
+      cat > "$1/usr/sbin/policy-rc.d" <<'EOS'
+      #!/bin/sh
+      exit 101
+      EOS
+      chmod +x "$1/usr/sbin/policy-rc.d"
+
+  customize-hooks:
+    - |
+      set -e
+      # Use deb822-style source with Signed-By (Ubuntu 22.04+)
+      install -d "$1/etc/apt/sources.list.d"
+      cat >"$1/etc/apt/sources.list.d/ubuntu.sources" <<'EOF'
+      Types: deb
+      URIs: http://ports.ubuntu.com/ubuntu-ports
+      Suites: noble noble-updates noble-security noble-backports
+      Components: main restricted universe multiverse
+      Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+      EOF
+
+      # Make apt more resilient in CI
+      cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
+      Acquire::ForceIPv4 "true";
+      Acquire::Retries "5";
+      Acquire::http::Timeout "30";
+      Acquire::https::Timeout "30";
+      EOF
 
   packages:
-    - ubuntu-keyring
     - ca-certificates
     - curl
     - wget
@@ -36,27 +69,3 @@ mmdebstrap:
     - libffi-dev
     - libusb-1.0-0-dev
     - libncurses-dev
-    - locales
-    - tzdata
-    - netbase
-    - arch-test      # optional: quiets foreign-arch checks inside chroot
-
-  setup-hooks:
-    - |
-      set -eu
-      # block services in chroot
-      install -d "$1/usr/sbin"
-      printf '#!/bin/sh\nexit 101\n' > "$1/usr/sbin/policy-rc.d"
-      chmod +x "$1/usr/sbin/policy-rc.d"
-
-  customize-hooks:
-    - |
-      set -eu
-      # small apt hardening for CI
-      install -d "$1/etc/apt/apt.conf.d"
-      cat > "$1/etc/apt/apt.conf.d/99net-tuning" <<'EOF'
-      Acquire::ForceIPv4 "true";
-      Acquire::Retries "5";
-      Acquire::http::Timeout "30";
-      Acquire::https::Timeout "30";
-      EOF
