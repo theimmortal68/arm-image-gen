@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-set -x
-set -e
+set -euox pipefail
 export LC_ALL=C
 source /common.sh; install_cleanup_trap
-
-set -euo pipefail
 
 # Keep whatever you already do here, then add:
 if ! grep -qE '(^|\s)localhost(\s|$)' /etc/hosts; then
