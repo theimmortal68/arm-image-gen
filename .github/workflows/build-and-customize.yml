@@ -45,7 +45,8 @@ jobs:
             qemu-user-static binfmt-support pandoc arch-test \
             ca-certificates curl wget jq git unzip rsync \
             parted dosfstools e2fsprogs kpartx xz-utils \
-            util-linux udev mount kmod file perl python3-pip
+            util-linux udev mount kmod file perl python3-pip \
+            debian-archive-keyring 
 
           # Make sure binfmt registrations are active
           sudo update-binfmts --enable qemu-aarch64 || true
