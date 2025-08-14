@@ -77,12 +77,6 @@ jobs:
           python3 -m pip install --user "git+https://github.com/bdrung/bdebstrap@${BDEB_REF}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-          # -------- sanity checks --------
-          echo "== versions =="
-          command -v mmdebstrap;  mmdebstrap --version || true
-          command -v bdebstrap;   bdebstrap --version  || true
-          command -v qemu-aarch64-static || true
-
       - name: Build rootfs with bdebstrap
         run: |
           bash scripts/build-bdebstrap.sh "${DEVICE}" "devices/${DEVICE}/layers.yaml" "out/${DEVICE}-bookworm-arm64"
