@@ -1,3 +1,1 @@
-# Pin the camera-streamer version the 52-camera-streamer.sh script will install.
-# Use a plain tag like "0.2.8" or the string "latest".
 0.2.8

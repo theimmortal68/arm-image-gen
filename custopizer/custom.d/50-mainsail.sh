@@ -1,56 +1,46 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -Eeuxo pipefail
 export LC_ALL=C
 source /common.sh; install_cleanup_trap
+export DEBIAN_FRONTEND=noninteractive
 
-# Fetch helper with retries (curl preferred, wget fallback)
-fetch() {
-  local url="$1" out="$2"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$out" "$url"
-  else
-    wget --tries=5 --waitretry=2 --retry-connrefused -O "$out" "$url"
-  fi
-}
+# Ensure nginx (best-effort)
+if is_in_apt nginx-light && ! is_installed nginx-light; then
+  apt-get update || true
+  apt-get install -y --no-install-recommends nginx-light unzip ca-certificates curl || true
+fi
 
-# Detect user
-[ -f /etc/ks-user.conf ] && . /etc/ks-user.conf || true
-KS_USER="${KS_USER:-pi}"
-HOME_DIR="$(getent passwd "$KS_USER" | cut -d: -f6)"
-[ -n "$HOME_DIR" ] || { echo_red "[mainsail] user $KS_USER missing"; exit 1; }
+# Install Mainsail (latest release ZIP)
+TMP=$(mktemp -d)
+URL="https://api.github.com/repos/mainsail-crew/mainsail/releases/latest"
+if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  TAG=$(curl -fsSL "$URL" | jq -r '.tag_name')
+  ZIP_URL="https://github.com/mainsail-crew/mainsail/releases/download/${TAG}/mainsail.zip"
+else
+  ZIP_URL="https://github.com/mainsail-crew/mainsail/releases/latest/download/mainsail.zip"
+fi
 
-# Ensure unzip/rsync exist (they’re in your base layer; belt & suspenders)
-is_in_apt unzip && ! is_installed unzip && apt-get update && apt-get install -y --no-install-recommends unzip || true
-is_in_apt rsync && ! is_installed rsync && apt-get update && apt-get install -y --no-install-recommends rsync || true
+mkdir -p /var/www/mainsail
+curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "${TMP}/mainsail.zip" "$ZIP_URL"
+unzip -o "${TMP}/mainsail.zip" -d /var/www/mainsail
 
-# Download latest mainsail release asset (stable zip)
-TMP=/tmp/mainsail.zip
-fetch "https://github.com/mainsail-crew/mainsail/releases/latest/download/mainsail.zip" "$TMP"
-
-# Unpack into /home/<user>/mainsail
-install -d "$HOME_DIR/mainsail"
-rm -rf /tmp/_mainsail_zip && mkdir -p /tmp/_mainsail_zip
-unzip -o "$TMP" -d /tmp/_mainsail_zip
-rsync -a --delete /tmp/_mainsail_zip/ "$HOME_DIR/mainsail/"
-chown -R "$KS_USER:$KS_USER" "$HOME_DIR/mainsail"
-
-# After unzip
-test -s /var/www/mainsail/index.html
-test -d /var/www/mainsail/assets
-
-# Nginx site (if you install nginx)
+# nginx site may already be staged; ensure dirs exist
 install -d /etc/nginx/sites-available /etc/nginx/sites-enabled
-cat >/etc/nginx/sites-available/mainsail <<'NGX'
+if [ ! -f /etc/nginx/sites-available/mainsail ]; then
+  cat >/etc/nginx/sites-available/mainsail <<'NGX'
 server {
   listen 80 default_server;
   server_name _;
   root /var/www/mainsail;
   index index.html;
-  location / {
-    try_files $uri $uri/ /index.html;
+  location / { try_files $uri $uri/ /index.html; }
+  location ~* \.(?:js|css|png|jpg|jpeg|gif|svg|ico|woff2?)$ {
+    expires 7d; add_header Cache-Control "public";
   }
 }
 NGX
-ln -sf /etc/nginx/sites-available/mainsail /etc/nginx/sites-enabled/mainsail
+  ln -sf /etc/nginx/sites-available/mainsail /etc/nginx/sites-enabled/mainsail
+fi
 
-echo_green "[mainsail] installed to $HOME_DIR/mainsail"
+test -s /var/www/mainsail/index.html
+echo "[mainsail] installed to /var/www/mainsail"
