@@ -1,7 +1,7 @@
 ---
 mmdebstrap:
   # Add Raspberry Pi archive, pin kernel/bootloader high, install firmware/kernel/EEPROM
-  customize-hook:
+  customize-hooks:
     - |
       set -eu
       export DEBIAN_FRONTEND=noninteractive
