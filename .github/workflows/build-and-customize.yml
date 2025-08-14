@@ -42,10 +42,18 @@ jobs:
           # OS-level tools you need regardless
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qemu-user-static binfmt-support pandoc \
+            qemu-user-static binfmt-support pandoc arch-test \
             ca-certificates curl wget jq git unzip rsync \
             parted dosfstools e2fsprogs kpartx xz-utils \
             util-linux udev mount kmod file perl python3-pip
+
+          # Make sure binfmt registrations are active
+          sudo update-binfmts --enable qemu-aarch64 || true
+          sudo update-binfmts --enable qemu-arm || true
+
+          # Sanity checks (should print "arm64: yes")
+          arch-test arm64
+          qemu-aarch64-static --version
 
           # ---- mmdebstrap from GitLab (clone the exact tag) ----
           rm -rf mmdebstrap-src
