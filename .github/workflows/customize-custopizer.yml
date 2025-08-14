@@ -47,8 +47,12 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
         uses: dawidd6/action-download-artifact@v6
         with:
+          # keep your existing selector(s) here (run_id / workflow / branch / etc)
           run_id: ${{ github.event.workflow_run.id }}
-          name: base-input-${{ env.DEVICE }}
+          # download by REGEX so either "base-input-rpi64" or "base-input-rpi64.img.xz" works
+          name: ^base-input-${{ env.DEVICE }}(\.img(\.xz)?|\.zip)?$
+          name_is_regexp: true
+          search_artifacts: true
           path: build
           skip_unpack: true
 
@@ -57,8 +61,12 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.base_run_id != '' }}
         uses: dawidd6/action-download-artifact@v6
         with:
-          run_id: ${{ inputs.base_run_id }}
-          name: base-input-${{ env.DEVICE }}
+          # keep your existing selector(s) here (run_id / workflow / branch / etc)
+          run_id: ${{ github.event.workflow_run.id }}
+          # download by REGEX so either "base-input-rpi64" or "base-input-rpi64.img.xz" works
+          name: ^base-input-${{ env.DEVICE }}(\.img(\.xz)?|\.zip)?$
+          name_is_regexp: true
+          search_artifacts: true
           path: build
           skip_unpack: true
 
@@ -67,70 +75,56 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.base_run_id == '' }}
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: build-base-image.yml
-          workflow_conclusion: success
-          name: base-input-${{ env.DEVICE }}
+          # keep your existing selector(s) here (run_id / workflow / branch / etc)
+          run_id: ${{ github.event.workflow_run.id }}
+          # download by REGEX so either "base-input-rpi64" or "base-input-rpi64.img.xz" works
+          name: ^base-input-${{ env.DEVICE }}(\.img(\.xz)?|\.zip)?$
+          name_is_regexp: true
+          search_artifacts: true
           path: build
-          branch: ${{ github.ref_name }}
           skip_unpack: true
 
       - name: Extract artifact safely (handles >2GiB)
         shell: bash
         run: |
           set -eux
-          ls -l build
-          ZIP="$(find build -maxdepth 1 -type f -name '*.zip' | head -n1)"
+          ls -l build || true
+          ZIP="$(find build -maxdepth 1 -type f -name '*.zip' | head -n1 || true)"
           if [[ -z "${ZIP}" ]]; then
             echo "No ZIP artifact found in build/"; exit 1
           fi
 
           sudo apt-get update
-          sudo apt-get install -y unzip || sudo apt-get install -y p7zip-full
-
-          # Prefer unzip; fallback to 7z
-          if unzip -o "${ZIP}" -d build; then
-            true
+          # Try unzip; if not present or fails on big files, fall back to 7z
+          if sudo apt-get install -y unzip; then
+            unzip -o "${ZIP}" -d build || { sudo apt-get install -y p7zip-full; 7z x -y -o"build" "${ZIP}"; }
           else
+            sudo apt-get install -y p7zip-full
             7z x -y -o"build" "${ZIP}"
           fi
           ls -l build
 
-      - name: Normalize extracted image path
+      - name: Normalize image path (supports .img and .img.xz)
         shell: bash
         run: |
           set -eux
-          # Find the first matching input-*.img anywhere under build/ (depth 3 to be safe)
-          IMG_SRC="$(find build -maxdepth 3 -type f -name "input-${DEVICE}.img" -o -name "input-*.img" | head -n1 || true)"
-          if [[ -z "${IMG_SRC}" ]]; then
-            # Some uploads keep original relative path (e.g. build/input-*.img inside zip)
-            IMG_SRC="$(find build -maxdepth 4 -type f -name "*.img" | head -n1 || true)"
+          # Prefer exact device-named files, then any matching input-*.img(.xz)
+          SRC="$(find build -maxdepth 4 -type f -name "input-${DEVICE}.img" -o -name "input-${DEVICE}.img.xz" | head -n1 || true)"
+          if [[ -z "${SRC}" ]]; then
+            SRC="$(find build -maxdepth 4 -type f \( -name "input-*.img" -o -name "input-*.img.xz" \) | head -n1 || true)"
           fi
-          test -n "${IMG_SRC}" || (echo "No .img found after extraction" && exit 1)
+          test -n "${SRC}" || (echo "No input image found after extraction"; exit 1)
+
+          # If it's compressed (.xz), decompress to a file we control
+          if [[ "${SRC}" == *.xz ]]; then
+            sudo apt-get update && sudo apt-get install -y xz-utils
+            xz -T0 -dk "${SRC}"            # leaves the .img next to it
+            SRC="${SRC%.xz}"
+          fi
 
           mkdir -p build
-          mv -f "${IMG_SRC}" "build/input-${DEVICE}.img"
+          mv -f "${SRC}" "build/input-${DEVICE}.img"
           ls -lh build
-
-      - name: Create CustoPiZer config.local
-        shell: bash
-        run: |
-          set -eux
-          case "${DEVICE:-rpi64}" in
-            rpi*|raspberrypi* ) DISTRO="raspbian" ;;
-            * )                 DISTRO="armbian"  ;;
-          esac
-
-          cat > "${GITHUB_WORKSPACE}/config.local" <<'EOF'
-          # Generated by workflow
-          EDITBASE_DISTRO=@DISTRO@
-          EDITBASE_MOUNT_PROC=1
-          EDITBASE_MOUNT_SYS=1
-          EDITBASE_IMAGE_ENLARGEROOT=8000
-          EDITBASE_IMAGE_RESIZEROOT=100
-          EDITBASE_ARCH=arm64
-          EOF
-
-          sed -i "s/@DISTRO@/${DISTRO}/g" "${GITHUB_WORKSPACE}/config.local"
 
       - name: Prepare workspace & rename to input.img
         shell: bash
