@@ -87,18 +87,23 @@ jobs:
       #   run: |
       #     echo "TODO: add orange pi image builder"; exit 1
 
-      - name: Normalize and upload artifact
+      - name: Compress base image
+        run: |
+          set -eux
+          xz -T0 -9e -f "build/input-${DEVICE}.img"
+          ls -lh "build/input-${DEVICE}.img.xz"
+
+      - name: Upload base image artifact
         shell: bash
         run: |
           set -eux
           sudo chown -R "$USER":"$USER" build || true
           mkdir -p build
-          test -s "build/input-${DEVICE}.img"
+          test -s "build/input-${DEVICE}.img.xz"
           # Keep per-device name so downstream workflow knows which to fetch
-          ls -lh build/input-${DEVICE}.img
-        # Upload per-device artifact
-      - uses: actions/upload-artifact@v4
+          ls -lh build/input-${DEVICE}.img.xz
+        uses: actions/upload-artifact@v4
         with:
-          name: base-input-${{ env.DEVICE }}
-          path: build/input-${{ env.DEVICE }}.img
-          if-no-files-found: error
+          name: base-input-${{ env.DEVICE }}.img.xz
+          path: build/input-${{ env.DEVICE }}.img.xz
+          compression-level: 0   # avoid double-compressing by the action
