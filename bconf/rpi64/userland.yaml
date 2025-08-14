@@ -1,7 +1,7 @@
 ---
 mmdebstrap:
   # Install Raspberry Pi userland & camera utilities AFTER repo is added by firmware.yaml
-  customize-hook:
+  customize-hooks:
     - |
       set -eu
       chroot "$1" bash -euo pipefail <<'EOSH'
