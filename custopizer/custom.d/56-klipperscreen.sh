@@ -20,7 +20,7 @@ apt-get update
 apt-get install -y --no-install-recommends \
   git ca-certificates python3-venv python3-pip \
   libglib2.0-0 libgtk-3-0 libmtdev1 \
-  libjpeg62-turbo libtiff5 libopenjp2-7 libfreetype6 \
+  libjpeg62-turbo libtiff6 libopenjp2-7 libfreetype6 \
   libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 \
   fonts-dejavu-core
 
