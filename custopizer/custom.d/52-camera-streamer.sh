@@ -8,7 +8,16 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 PIN_FILE="/files/etc/camera-streamer.version"
 TAG_DEFAULT="0.2.8"
 
-# --- helpers -------------------------------------------------------------------
+# ---- helpers -----------------------------------------------------------------
+fetch() {
+  local url="$1" out="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$out" "$url"
+  else
+    wget --tries=5 --waitretry=2 --retry-connrefused -O "$out" "$url"
+  fi
+}
+
 read_pin() {
   local t=""
   if [ -f "$PIN_FILE" ]; then
@@ -16,7 +25,7 @@ read_pin() {
   elif [ -n "${CAMERA_STREAMER_TAG:-}" ]; then
     t="$(printf '%s' "$CAMERA_STREAMER_TAG" | sed 's/^[vV]//' || true)"
   fi
-  # Accept X.Y or X.Y.Z optionally with -/_suffix, or 'latest'; otherwise blank
+  # Accept X.Y or X.Y.Z (+ optional -/_suffix) or 'latest'
   if [ -n "${t:-}" ] && ! printf '%s' "$t" | grep -Eq '^[0-9]+(\.[0-9]+){1,2}([._-][0-9A-Za-z]+)?$|^latest$'; then
     t=""
   fi
@@ -33,129 +42,141 @@ gh_api_latest_tag() {
   printf '%s' "$tag"
 }
 
-first_ok_url() {
-  for u in "$@"; do
-    if curl -fsSLI --retry 3 --retry-delay 2 "$u" >/dev/null 2>&1; then
-      echo "$u"; return 0
-    fi
-  done
-  return 1
-}
-
 resolve_bin() {
   if command -v camera-streamer >/dev/null 2>&1; then
-    command -v camera-streamer
-    return 0
+    command -v camera-streamer; return 0
   fi
-  for p in /usr/local/bin/camera-streamer /usr/bin/camera-streamer /bin/camera-streamer; do
+  for p in /usr/bin/camera-streamer /usr/local/bin/camera-streamer /bin/camera-streamer; do
     [ -x "$p" ] && { echo "$p"; return 0; }
   done
   return 1
 }
 
-# --- resolve version/tag -------------------------------------------------------
+have_pkg() { apt-cache show "$1" >/dev/null 2>&1; }
+
+# ---- environment -------------------------------------------------------------
+apt-get update || true
+apt-get install -y --no-install-recommends ca-certificates curl wget xz-utils tar || true
+
+ARCH="$(dpkg --print-architecture)"                          # arm64 / armhf
+CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME:-bookworm}")"
+[ -n "$CODENAME" ] || CODENAME="bookworm"
+
+# Prefer generic build on Debian; we’ll still try raspi if needed
+PREFER_VARIANTS=(generic raspi)
+
+# If we detect an RPi kernel, keep raspi as a later candidate (not first)
+if [ -e /etc/default/raspberrypi-kernel ]; then
+  :
+fi
+
 TAG="$(read_pin || true)"
 if [ -z "${TAG:-}" ] || [ "$TAG" = "latest" ]; then
   rtag="$(gh_api_latest_tag || true)"
   TAG="${rtag:-$TAG_DEFAULT}"
 fi
 
-# --- arch / variant / codename -------------------------------------------------
-ARCH="$(dpkg --print-architecture)"                    # e.g., arm64, armhf
-CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME:-bookworm}")"
-[ -n "$CODENAME" ] || CODENAME="bookworm"
+echo "[camera-streamer] will try install tag=v${TAG} arch=${ARCH} codename=${CODENAME}"
 
-VARIANT="generic"
-if [ -e /etc/default/raspberrypi-kernel ] || grep -qi 'raspberry pi' /proc/device-tree/model 2>/dev/null; then
-  VARIANT="raspi"
-fi
-
-case "$ARCH" in
-  arm64|aarch64) ASSET_ARCH="linux_aarch64" ;;
-  armhf|armel|arm) ASSET_ARCH="linux_armv7" ;;
-  *) echo "[camera-streamer] unsupported dpkg arch: $ARCH"; exit 2 ;;
-esac
-
-# --- deps ----------------------------------------------------------------------
-apt-get update || true
-apt-get install -y --no-install-recommends ca-certificates curl wget xz-utils tar dpkg || true
-
-# --- prefer .deb assets, then fallback to tarball ------------------------------
 BASE="https://github.com/ayufan/camera-streamer/releases/download/v${TAG}"
-DEB_CANDIDATES=(
-  "${BASE}/camera-streamer-${VARIANT}_${TAG}.${CODENAME}_${ARCH}.deb"
-  "${BASE}/camera-streamer-${VARIANT}_${TAG}.bullseye_${ARCH}.deb"
-  "${BASE}/camera-streamer_${TAG}.${CODENAME}_${ARCH}.deb"
-  "${BASE}/camera-streamer_${TAG}.bullseye_${ARCH}.deb"
-)
-TARBALL="${BASE}/camera-streamer_${TAG}_${ASSET_ARCH}.tar.gz"
-
-CHOSEN_URL="$(first_ok_url "${DEB_CANDIDATES[@]}")" || CHOSEN_URL="$TARBALL"
-
-echo "[camera-streamer] resolved TAG: ${TAG}"
-echo "[camera-streamer] chosen URL: ${CHOSEN_URL}"
-
 TMP="$(mktemp -d)"
 
-# If a staged binary exists under /files, prefer that and skip downloads
-if [ -x /files/usr/local/bin/camera-streamer ]; then
-  install -Dm0755 /files/usr/local/bin/camera-streamer /usr/local/bin/camera-streamer
-  echo "[camera-streamer] installed staged binary from /files"
-else
-  if printf '%s' "$CHOSEN_URL" | grep -q '\.deb$'; then
-    # --- .deb path
-    OUT="${TMP}/camera-streamer.deb"
-    curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$OUT" "$CHOSEN_URL"
-    dpkg -i "$OUT" || apt-get -y -f install
-  else
-    # --- tarball fallback
-    OUT="${TMP}/camera-streamer.tgz"
-    curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$OUT" "$CHOSEN_URL"
+# candidates in priority order:
+#  1) generic bookworm  2) generic bullseye
+#  3) raspi   bookworm  4) raspi   bullseye
+try_install_candidates() {
+  local ok=0
+  for VARIANT in "${PREFER_VARIANTS[@]}"; do
+    for CODE in "${CODENAME}" bullseye; do
+      local PKG="camera-streamer-${VARIANT}_${TAG}.${CODE}_${ARCH}.deb"
+      # the project also publishes non-suffixed names sometimes:
+      local ALT1="camera-streamer_${TAG}.${CODE}_${ARCH}.deb"
+      local URL="${BASE}/${PKG}"
+      local URL_ALT="${BASE}/${ALT1}"
+
+      echo "[camera-streamer] trying: ${PKG}"
+      local OUT="${TMP}/camera-streamer_${VARIANT}_${CODE}.deb"
+      if fetch "$URL" "$OUT" || fetch "$URL_ALT" "$OUT"; then
+        # Use apt so dependencies are resolved from configured repos
+        if apt-get install -y --no-install-recommends "$OUT"; then
+          echo "[camera-streamer] installed ${VARIANT} (${CODE})"
+          ok=1; break
+        else
+          echo "[camera-streamer] apt install failed for ${VARIANT}/${CODE}, will try next candidate"
+        fi
+      else
+        echo "[camera-streamer] not found: ${URL} (or ALT), trying next"
+      fi
+    done
+    [ "$ok" -eq 1 ] && break
+  done
+  return "$ok"
+}
+
+# ---- install path ------------------------------------------------------------
+if ! try_install_candidates; then
+  # last resort: tarball (may be missing on some tags)
+  case "$ARCH" in
+    arm64|aarch64) ASSET_ARCH="linux_aarch64" ;;
+    armhf|armel|arm) ASSET_ARCH="linux_armv7" ;;
+    *) echo "[camera-streamer] unsupported arch: $ARCH"; exit 2 ;;
+  esac
+  local OUT="${TMP}/camera-streamer.tgz"
+  local TARBALL="${BASE}/camera-streamer_${TAG}_${ASSET_ARCH}.tar.gz"
+  echo "[camera-streamer] falling back to tarball: ${TARBALL}"
+  if fetch "$TARBALL" "$OUT"; then
     tar -xzf "$OUT" -C "$TMP"
     CS_PATH="$(find "$TMP" -type f -name 'camera-streamer' -perm -111 | head -n1 || true)"
     [ -n "$CS_PATH" ] || { echo "[camera-streamer] binary not found in tarball"; ls -R "$TMP" || true; exit 1; }
     install -Dm0755 "$CS_PATH" /usr/local/bin/camera-streamer
+  else
+    echo "[camera-streamer] tarball not available for this tag (common), aborting"
+    exit 1
   fi
 fi
 
-# --- resolve final binary path -------------------------------------------------
+# Resolve final binary path
 BIN="$(resolve_bin || true)"
 if [ -z "${BIN:-}" ]; then
-  echo "[camera-streamer] ERROR: camera-streamer not found in PATH after install"
+  echo "[camera-streamer] ERROR: camera-streamer not found after install"
+  # If we installed raspi variant and the special libcamera isn’t present, hint:
+  if ! have_pkg libcamera0 && ! have_pkg libcamera0.1; then
+    echo "[camera-streamer] hint: camera deps missing; switching to generic variant is recommended."
+  fi
   exit 1
 fi
 echo "[camera-streamer] using binary: $BIN"
 
-# --- health checks (no hardware required) -------------------------------------
+# ---- health checks (no hardware required) ------------------------------------
 set +e
 "$BIN" --version > /tmp/cs.version 2>&1; CS_VERS_RC=$?
 set -e
 if [ $CS_VERS_RC -ne 0 ] || ! grep -qE 'camera-streamer|version|^v?[0-9]+\.' /tmp/cs.version; then
-  echo "[camera-streamer] version check failed"; cat /tmp/cs.version || true; exit 1
+  echo "[camera-streamer] --version failed"; cat /tmp/cs.version || true
+  exit 1
 fi
-"$BIN" --help >/tmp/cs.help 2>&1 || true
+
+CS_STATUS=0
+"$BIN" --help >/tmp/cs.help 2>&1 || CS_STATUS=$?
 if [ ! -s /tmp/cs.help ] || grep -qiE 'segmentation fault|illegal instruction|bus error' /tmp/cs.help; then
-  echo "[camera-streamer] --help produced no output or crashed"; cat /tmp/cs.help || true; exit 1
+  echo "[camera-streamer] --help produced no output or crashed"
+  cat /tmp/cs.help || true
+  exit 1
 fi
 
 if command -v ldd >/dev/null 2>&1; then
-  ldd "$BIN" | awk '/=>/ {print "[ldd] " $0}' || true
+  if MISSING="$(ldd "$BIN" 2>/dev/null | awk '/not found/ {print $1}')" && [ -n "$MISSING" ]; then
+    echo "[camera-streamer] missing libs: $MISSING"; exit 1
+  fi
 fi
 
-echo "[camera-streamer] OK: $(head -n1 /tmp/cs.version || echo 'version unknown')"
+echo "[camera-streamer] OK: $(head -n1 /tmp/cs.version || echo 'version unknown') (help exit=${CS_STATUS})"
 
-# --- Libcamera/camera stack sanity (RPi only) ---------------------------------
-if [ "$VARIANT" = "raspi" ]; then
-  echo "[libcamera] probing versions and libraries"
-  (apt-cache policy libcamera0 2>/dev/null | sed -n '1,20p') || true
-  dpkg -l | awk '/^ii/ && /(libcamera|v4l2|raspberrypi)/ {printf "[pkg] %-40s %s\n",$2,$3}' || true
-  ldconfig -p 2>/dev/null | grep -E 'libcamera|v4l2' || true
-
+# ---- RPi libcamera overlay (RPi kernels) -------------------------------------
+if [ -e /etc/default/raspberrypi-kernel ]; then
   install -d /boot/firmware
   if ! grep -q '^dtoverlay=vc4-kms-v3d' /boot/firmware/config.txt 2>/dev/null; then
     echo "dtoverlay=vc4-kms-v3d" >> /boot/firmware/config.txt
     echo "[libcamera] added dtoverlay=vc4-kms-v3d to /boot/firmware/config.txt"
   fi
 fi
-
-# No unit here; crowsnest will orchestrate streaming.
