@@ -17,7 +17,7 @@ is_in_apt python3-venv || { echo_red "[klipper] python3-venv missing"; exit 1; }
 
 # ---- New: numeric stack for Klipper & friends ----
 # Install system packages when available (Debian Bookworm / RPi repo names)
-NUM_PKGS=(python3-numpy python3-matplotlib libatlas3-base libatlas-base-dev libgfortran5)
+NUM_PKGS=(python3-serial python3-opencv python3-numpy python3-matplotlib libatlas3-base libatlas-base-dev libgfortran5)
 TO_INSTALL=()
 for pkg in "${NUM_PKGS[@]}"; do
   is_in_apt "$pkg" && TO_INSTALL+=("$pkg") || true
