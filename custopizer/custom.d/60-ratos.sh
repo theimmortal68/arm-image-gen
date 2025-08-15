@@ -47,23 +47,6 @@ runuser -u "${KS_USER}" -- bash -lc "
 # Fast-forward only on pull for the user
 runuser -u "${KS_USER}" -- git config --global pull.ff only
 
-# --- Apply overlay files from custopizer/custom.d/files/ into the rootfs
-# Locate the sibling "files" dir relative to this script (robust to bind-mount path)
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-OVERLAY_DIR="${SCRIPT_DIR}/files"
-
-if [ -d "${OVERLAY_DIR}" ]; then
-  # Install only the files you listed (no idempotence guards; will overwrite)
-  if [ -f "${OVERLAY_DIR}/etc/avahi/avahi-daemon.conf" ]; then
-    install -D -m 0644 "${OVERLAY_DIR}/etc/avahi/avahi-daemon.conf" "/etc/avahi/avahi-daemon.conf"
-    echo_green "Overlay: installed /etc/avahi/avahi-daemon.conf"
-  fi
-  if [ -f "${OVERLAY_DIR}/var/log/ratos.log" ]; then
-    install -D -m 0644 "${OVERLAY_DIR}/var/log/ratos.log" "/var/log/ratos.log"
-    echo_green "Overlay: installed /var/log/ratos.log"
-  fi
-fi
-
 # --- Create a release file (Moonraker/distro detection friendliness)
 codename="$(awk -F= '/^VERSION_CODENAME=/{print $2}' /etc/os-release || true)"
 : "${codename:=unknown}"
