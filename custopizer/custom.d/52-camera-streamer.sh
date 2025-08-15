@@ -62,13 +62,8 @@ ARCH="$(dpkg --print-architecture)"                          # arm64 / armhf
 CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME:-bookworm}")"
 [ -n "$CODENAME" ] || CODENAME="bookworm"
 
-# Prefer generic build on Debian; we’ll still try raspi if needed
+# Prefer generic build on Debian; still try raspi if generic not available
 PREFER_VARIANTS=(generic raspi)
-
-# If we detect an RPi kernel, keep raspi as a later candidate (not first)
-if [ -e /etc/default/raspberrypi-kernel ]; then
-  :
-fi
 
 TAG="$(read_pin || true)"
 if [ -z "${TAG:-}" ] || [ "$TAG" = "latest" ]; then
@@ -85,11 +80,10 @@ TMP="$(mktemp -d)"
 #  1) generic bookworm  2) generic bullseye
 #  3) raspi   bookworm  4) raspi   bullseye
 try_install_candidates() {
-  local ok=0
+  local ok=1  # non-zero means failure; we'll set to 0 on success
   for VARIANT in "${PREFER_VARIANTS[@]}"; do
     for CODE in "${CODENAME}" bullseye; do
       local PKG="camera-streamer-${VARIANT}_${TAG}.${CODE}_${ARCH}.deb"
-      # the project also publishes non-suffixed names sometimes:
       local ALT1="camera-streamer_${TAG}.${CODE}_${ARCH}.deb"
       local URL="${BASE}/${PKG}"
       local URL_ALT="${BASE}/${ALT1}"
@@ -97,20 +91,20 @@ try_install_candidates() {
       echo "[camera-streamer] trying: ${PKG}"
       local OUT="${TMP}/camera-streamer_${VARIANT}_${CODE}.deb"
       if fetch "$URL" "$OUT" || fetch "$URL_ALT" "$OUT"; then
-        # Use apt so dependencies are resolved from configured repos
+        # Use apt so dependencies resolve from the image's repos
         if apt-get install -y --no-install-recommends "$OUT"; then
           echo "[camera-streamer] installed ${VARIANT} (${CODE})"
-          ok=1; break
+          ok=0; break
         else
-          echo "[camera-streamer] apt install failed for ${VARIANT}/${CODE}, will try next candidate"
+          echo "[camera-streamer] apt install failed for ${VARIANT}/${CODE}, trying next candidate"
         fi
       else
         echo "[camera-streamer] not found: ${URL} (or ALT), trying next"
       fi
     done
-    [ "$ok" -eq 1 ] && break
+    [ "$ok" -eq 0 ] && break
   done
-  return "$ok"
+  return "$ok"  # 0 = success, 1 = failure
 }
 
 # ---- install path ------------------------------------------------------------
@@ -121,8 +115,8 @@ if ! try_install_candidates; then
     armhf|armel|arm) ASSET_ARCH="linux_armv7" ;;
     *) echo "[camera-streamer] unsupported arch: $ARCH"; exit 2 ;;
   esac
-  local OUT="${TMP}/camera-streamer.tgz"
-  local TARBALL="${BASE}/camera-streamer_${TAG}_${ASSET_ARCH}.tar.gz"
+  OUT="${TMP}/camera-streamer.tgz"
+  TARBALL="${BASE}/camera-streamer_${TAG}_${ASSET_ARCH}.tar.gz"
   echo "[camera-streamer] falling back to tarball: ${TARBALL}"
   if fetch "$TARBALL" "$OUT"; then
     tar -xzf "$OUT" -C "$TMP"
@@ -139,9 +133,8 @@ fi
 BIN="$(resolve_bin || true)"
 if [ -z "${BIN:-}" ]; then
   echo "[camera-streamer] ERROR: camera-streamer not found after install"
-  # If we installed raspi variant and the special libcamera isn’t present, hint:
   if ! have_pkg libcamera0 && ! have_pkg libcamera0.1; then
-    echo "[camera-streamer] hint: camera deps missing; switching to generic variant is recommended."
+    echo "[camera-streamer] hint: missing libcamera packages; generic variant is recommended."
   fi
   exit 1
 fi
