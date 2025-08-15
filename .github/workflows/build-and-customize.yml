@@ -204,21 +204,40 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          # Fix sudo/su ownership & setuid *inside* the image before CustoPiZer runs
+
+          # Sanity: the normalized path must exist
+          test -f "${GITHUB_WORKSPACE}/build/input.img"
+
+          # Use a privileged Custopizer container to manipulate the image safely
+          # (privileged is required for loop + device-mapper via kpartx)
           docker run --rm --privileged \
             -v "${GITHUB_WORKSPACE}/build/input.img:/image.img" \
             --entrypoint /bin/sh \
             ghcr.io/octoprint/custopizer:latest \
             -ec '
-              set -eu
+              set -euo pipefail
+
               apt-get update
-              apt-get install -y kpartx e2fsprogs util-linux
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                kpartx e2fsprogs util-linux mount udev
+
+              cleanup() {
+                set +e
+                sync
+                umount /mnt/rootfs 2>/dev/null || true
+                if [ -n "${MAP:-}" ]; then kpartx -dv "$LOOP" 2>/dev/null || true; fi
+                losetup -d "$LOOP" 2>/dev/null || true
+              }
+              trap cleanup EXIT
 
               LOOP=$(losetup -Pf --show /image.img)
               partprobe "$LOOP" || true
               kpartx -av "$LOOP"
-
               MAP=$(basename "$LOOP")
+              # Wait a moment for /dev/mapper nodes to appear
+              udevadm settle || true
+
+              # Prefer p2; otherwise pick the first ext4 partition
               ROOTP=""
               if [ -e "/dev/mapper/${MAP}p2" ]; then
                 ROOTP="/dev/mapper/${MAP}p2"
@@ -233,17 +252,23 @@ jobs:
               mkdir -p /mnt/rootfs
               mount "$ROOTP" /mnt/rootfs
 
-              chown 0:0 /mnt/rootfs/usr/bin/sudo  || true
-              chmod 4755 /mnt/rootfs/usr/bin/sudo || true
-              chown 0:0 /mnt/rootfs/etc/sudo.conf /mnt/rootfs/etc/sudoers || true
-              chmod 0440 /mnt/rootfs/etc/sudoers  || true
+              # Fix sudo/su ownership + setuid inside the image
+              if [ -e /mnt/rootfs/usr/bin/sudo ]; then
+                chown 0:0 /mnt/rootfs/usr/bin/sudo  || true
+                chmod 4755 /mnt/rootfs/usr/bin/sudo || true
+              fi
+              # sudoers must be root:root and 0440
+              if [ -e /mnt/rootfs/etc/sudoers ]; then
+                chown 0:0 /mnt/rootfs/etc/sudoers || true
+                chmod 0440 /mnt/rootfs/etc/sudoers || true
+              fi
+              # Optional: sudo.conf if present
+              [ -e /mnt/rootfs/etc/sudo.conf ] && chown 0:0 /mnt/rootfs/etc/sudo.conf || true
+
+              # su can be in /bin or /usr/bin depending on base
               for su in /mnt/rootfs/bin/su /mnt/rootfs/usr/bin/su; do
                 [ -e "$su" ] && { chown 0:0 "$su" || true; chmod 4755 "$su" || true; }
               done
-
-              umount /mnt/rootfs
-              kpartx -dv "$LOOP"
-              losetup -d "$LOOP"
             '
 
       - name: Generate CustoPiZer config.local
