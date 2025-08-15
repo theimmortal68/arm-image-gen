@@ -2,180 +2,240 @@ name: Build and Customize (Klipper Suite)
 
 on:
   workflow_dispatch:
+    inputs:
+      devices:
+        description: "Comma-separated device list (e.g. rpi64,orangepi5max)"
+        required: false
+        default: "rpi64,orangepi5max"
+
+permissions:
+  actions: read
+  contents: read
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Turn CSV input into a JSON array for matrix
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      devices: ${{ steps.mk.outputs.devices }}
+    steps:
+      - id: mk
+        shell: bash
+        run: |
+          set -euo pipefail
+          CSV="${{ github.event.inputs.devices }}"
+          # Split on comma, trim whitespace, drop empties, emit JSON array
+          json="[$(
+            printf '%s' "$CSV" \
+            | tr ',' '\n' \
+            | awk '{$1=$1}1' \
+            | awk 'length>0{printf "\"%s\",",$0}' \
+            | sed 's/,$//'
+          )]"
+          echo "devices=$json" >> "$GITHUB_OUTPUT"
+          echo "Using matrix: $json"
+
+  # =========================
+  # 1) Build the base image
+  # =========================
   build:
     runs-on: ubuntu-latest
+    needs: prepare-matrix
     strategy:
       fail-fast: false
       matrix:
-        device: [ rpi64 ]   # add more later, e.g. orangepi5max
+        device: ${{ fromJSON(needs.prepare-matrix.outputs.devices) }}
     env:
       DEVICE: ${{ matrix.device }}
-      ENLARGEROOT: "8000"
-
+      # Optional pins; adjust if you want different versions
+      MM_TAG: "1.0.7"
+      BDEB_REF: "v0.24.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Install mmdebstrap (v1.5.7) + bdebstrap (GitHub) + host deps
-        env:
-          MMDEBSTRAP_REF: "1.5.7"      # tag name on GitLab (try without/with 'v' prefix)
-          BDEBSTRAP_REF:  "v0.7.0"     # pick a tag or 'main'
-        shell: bash
+      - name: Apt prep
         run: |
-          set -euo pipefail
-
-          MM_TAG="${MMDEBSTRAP_REF:-1.5.7}"
-          BDEB_REF="${BDEBSTRAP_REF:-v0.7.0}"
-
+          set -eux
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            qemu-user-static binfmt-support pandoc arch-test \
-            ca-certificates curl wget jq git unzip rsync \
-            parted dosfstools e2fsprogs kpartx xz-utils \
-            util-linux udev mount kmod file perl python3-pip \
-            debian-archive-keyring
+          sudo apt-get install -y \
+            qemu-user-static binfmt-support qemu-utils kpartx dosfstools \
+            parted e2fsprogs rsync xz-utils ca-certificates curl git \
+            arch-test
 
+      - name: Enable binfmts (arm/arm64)
+        run: |
+          set -eux
           sudo update-binfmts --enable qemu-aarch64 || true
           sudo update-binfmts --enable qemu-arm || true
           arch-test arm64
           qemu-aarch64-static --version
 
-          # ---- mmdebstrap from GitLab (exact tag) ----
+      - name: Install mmdebstrap (pinned)
+        run: |
+          set -eux
           rm -rf mmdebstrap-src
           git clone --depth=1 --branch "${MM_TAG}" \
             https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src || {
-            echo "Direct clone of tag ${MM_TAG} failed, trying with 'v' prefix…"
+            echo "Tag ${MM_TAG} missing without 'v' prefix, retrying…"
             git clone --depth=1 --branch "v${MM_TAG}" \
               https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src
           }
           sudo install -D -m 0755 mmdebstrap-src/mmdebstrap /usr/local/bin/mmdebstrap
-          [ -f mmdebstrap-src/mmdebstrap.1 ] && \
-            sudo install -D -m 0644 mmdebstrap-src/mmdebstrap.1 /usr/local/share/man/man1/mmdebstrap.1 || true
-          [ -d mmdebstrap-src/share/mmdebstrap ] && \
-            sudo mkdir -p /usr/local/share/mmdebstrap && \
-            sudo cp -a mmdebstrap-src/share/mmdebstrap/. /usr/local/share/mmdebstrap/ || true
 
-          # -------- bdebstrap from upstream GitHub --------
+      - name: Install bdebstrap (runner local user)
+        run: |
+          set -eux
           python3 -m pip install --user --upgrade pip wheel
           python3 -m pip install --user "git+https://github.com/bdrung/bdebstrap@${BDEB_REF}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build rootfs with bdebstrap
         run: |
+          set -eux
           bash scripts/build-bdebstrap.sh "${DEVICE}" "devices/${DEVICE}/layers.yaml" "out/${DEVICE}-bookworm-arm64"
 
       - name: Make bootable image (Raspberry Pi)
-        if: matrix.device == 'rpi64'
+        if: startsWith(matrix.device, 'rpi')
         run: |
+          set -eux
           sudo bash scripts/make-img-rpi.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
+          ls -lh build
 
-      # Example placeholder for other devices:
-      # - name: Make bootable image (Orange Pi 5 Max)
-      #   if: matrix.device == 'orangepi5max'
-      #   run: |
-      #     echo "TODO: add orange pi image builder (u-boot/extlinux)"; exit 1
+      - name: Make bootable image (Armbian devices)
+        if: startsWith(matrix.device, 'orange')
+        run: |
+          set -eux
+          # Implement this script for your Armbian targets when ready:
+          # it should create build/input-${DEVICE}.img from the rootfs.
+          sudo bash scripts/make-img-armbian.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
 
-      # --- CustoPiZer (RAW DOCKER) with explicit DNS and proper script mount ---
-      - name: Create CustoPiZer config.local
+      - name: Package base artifact (ZIP)
+        run: |
+          set -eux
+          mkdir -p artifacts
+          zip -r "artifacts/base-input-${DEVICE}.zip" "build/input-${DEVICE}.img"
+
+      - name: Upload base artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-input-${{ env.DEVICE }}
+          path: artifacts/base-input-${{ env.DEVICE }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # =========================
+  # 2) Customize via CustoPiZer
+  # =========================
+  customize:
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJSON(needs.prepare-matrix.outputs.devices) }}
+    env:
+      DEVICE: ${{ matrix.device }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Ensure custom.d present & executable
         shell: bash
         run: |
           set -eux
+          test -d custopizer/custom.d
+          chmod -R a+rx custopizer/custom.d
 
-          # raspbian for Raspberry Pi, armbian for others
-          case "${DEVICE:-rpi64}" in
-            rpi*|raspberrypi* ) DISTRO="raspbian" ;;
-            * )                 DISTRO="armbian"  ;;
+      - name: Download base artifact from build job (no unzip)
+        uses: actions/download-artifact@v4
+        with:
+          name: base-input-${{ env.DEVICE }}
+          path: build
+          merge-multiple: false
+
+      - name: Extract artifact safely (handles >2GiB)
+        shell: bash
+        run: |
+          set -eux
+          ls -l build || true
+          ZIP="$(find build -maxdepth 1 -type f -name '*.zip' | head -n1 || true)"
+          if [ -z "${ZIP}" ]; then
+            echo "No ZIP artifact found in build/"; exit 1
+          fi
+
+          sudo apt-get update
+          if sudo apt-get install -y unzip; then
+            unzip -o "${ZIP}" -d build || { sudo apt-get install -y p7zip-full; 7z x -y -o"build" "${ZIP}"; }
+          else
+            sudo apt-get install -y p7zip-full
+            7z x -y -o"build" "${ZIP}"
+          fi
+          ls -l build
+
+      - name: Normalize image path (supports .img and .img.xz)
+        shell: bash
+        run: |
+          set -eux
+          SRC="$(find build -maxdepth 4 -type f \( -name "input-${DEVICE}.img" -o -name "input-${DEVICE}.img.xz" -o -name "input-*.img" -o -name "input-*.img.xz" \) | head -n1 || true)"
+          [ -n "${SRC}" ] || { echo "No input image found after extraction"; exit 1; }
+
+          if [[ "${SRC}" == *.xz ]]; then
+            sudo apt-get update && sudo apt-get install -y xz-utils
+            xz -T0 -dk "${SRC}"   # keep .xz, emit .img alongside
+            SRC="${SRC%.xz}"
+          fi
+
+          mkdir -p build
+          mv -f "${SRC}" "build/input-${DEVICE}.img" || true
+          mv -f "build/input-${DEVICE}.img" "build/input.img"
+          ls -lh build
+
+      - name: Generate CustoPiZer config.local
+        shell: bash
+        run: |
+          set -eux
+          case "${DEVICE}" in
+            rpi*|raspberrypi*) DISTRO="raspbian" ;;
+            *)                 DISTRO="armbian"  ;;
           esac
-
-          cat > "${GITHUB_WORKSPACE}/config.local" <<'EOF'
-          # Auto-generated by GitHub Actions
-          EDITBASE_DISTRO=@DISTRO@
+          cat > "${GITHUB_WORKSPACE}/config.local" <<EOF
+          EDITBASE_DISTRO=${DISTRO}
           EDITBASE_MOUNT_PROC=1
           EDITBASE_MOUNT_SYS=1
           EDITBASE_IMAGE_ENLARGEROOT=8000
           EDITBASE_IMAGE_RESIZEROOT=100
           EDITBASE_ARCH=arm64
           EOF
+          cat "${GITHUB_WORKSPACE}/config.local"
 
-          sed -i "s/@DISTRO@/${DISTRO}/g" "${GITHUB_WORKSPACE}/config.local"
-
-      - name: Ensure scripts dir & perms
-        shell: bash
-        run: |
-          set -eux
-          test -d scripts
-          chmod -R a+rx scripts
-
-      - name: Fix build directory ownership (pre-normalize)
-        shell: bash
-        run: |
-          set -eux
-          sudo mkdir -p build
-          sudo chown -R "$USER":"$USER" build
-          chmod -R u+rwX build
-
-      - name: Normalize input image name to build/input.img
-        shell: bash
-        run: |
-          set -eux
-          sudo rm -f build/input.img || true
-          if [[ -f "build/input-${DEVICE}.img" ]]; then
-            sudo chown "$USER":"$USER" "build/input-${DEVICE}.img"
-            mv -f "build/input-${DEVICE}.img" "build/input.img"
-          fi
-          test -s build/input.img
-
-      - name: Pull CustoPiZer image (for reliability)
+      - name: Pull CustoPiZer image
         run: |
           set -eux
           docker pull ghcr.io/octoprint/custopizer:latest
 
-      - name: Sanitize CustoPiZer scripts (no sudo in chroot)
+      - name: Run CustoPiZer (bind custom.d, explicit DNS)
         shell: bash
         run: |
           set -eux
-          test -d scripts
-          # Replace common sudo patterns with chroot-safe equivalents
-          for f in scripts/*.sh; do
-            # Skip non-regular files
-            [ -f "$f" ] || continue
-            sed -i \
-              -e 's/sudo[[:space:]]\+-u[[:space:]]\+pi[[:space:]]\+/runuser -u pi -- /g' \
-              -e 's/\bsudo[[:space:]]\+apt-get\b/apt-get/g' \
-              -e 's/\bsudo[[:space:]]\+apt\b/apt/g' \
-              -e 's/\bsudo[[:space:]]\+systemctl\b/systemctl/g' \
-              -e 's/\bsudo[[:space:]]\+chown\b/chown/g' \
-              "$f"
-            # Drop any lingering attempts to install policykit-1 in chroot
-            sed -i -e '/apt-get[[:space:]]\+-y[[:space:]]\+install[[:space:]]\+policykit-1/d' "$f" || true
-          done
-          chmod -R a+rx scripts
-
-      - name: Run CustoPiZer (raw docker with DNS)
-        shell: bash
-        run: |
-          set -eux
-          # Workspace must contain:
-          #   /CustoPiZer/workspace/input.img
-          #   /CustoPiZer/workspace/scripts/  (your repo scripts)
           docker run --rm --privileged \
             --dns 8.8.8.8 --dns 1.1.1.1 \
             -v "${GITHUB_WORKSPACE}/build:/CustoPiZer/workspace" \
-            -v "${GITHUB_WORKSPACE}/scripts:/CustoPiZer/workspace/scripts" \
+            -v "${GITHUB_WORKSPACE}/custopizer/custom.d:/CustoPiZer/workspace/scripts" \
             -v "${GITHUB_WORKSPACE}/config.local:/CustoPiZer/config.local" \
             ghcr.io/octoprint/custopizer:latest
 
-          # Rename output for artifacts
           mv -f "${GITHUB_WORKSPACE}/build/output.img" \
                 "${GITHUB_WORKSPACE}/build/output-${DEVICE}.img"
+          ls -lh build
 
       - name: Take ownership of output (post-CustoPiZer)
         shell: bash
@@ -184,8 +244,18 @@ jobs:
           sudo chown -R "$USER":"$USER" build
           chmod -R u+rwX build
 
-      - name: Upload image artifact
+      - name: Compress output (.xz)
+        shell: bash
+        run: |
+          set -eux
+          sudo apt-get update && sudo apt-get install -y xz-utils
+          xz -T0 -9e -f "build/output-${DEVICE}.img"
+          ls -lh build
+
+      - name: Upload customized image (.img.xz)
         uses: actions/upload-artifact@v4
         with:
-          name: output-${{ env.DEVICE }}.img
-          path: build/output-${{ env.DEVICE }}.img
+          name: output-${{ env.DEVICE }}.img.xz
+          path: build/output-${{ env.DEVICE }}.img.xz
+          if-no-files-found: error
+          retention-days: 7
