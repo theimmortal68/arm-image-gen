@@ -1,6 +1,7 @@
 #!/bin/bash
 set -Eeuo pipefail
 export LC_ALL=C
+# shellcheck disable=SC1091
 source /common.sh; install_cleanup_trap
 
 #--- discover user/home set by our earlier user scripts ------------------------
@@ -43,7 +44,7 @@ elif [[ -f requirements.txt ]]; then
   "${VENV}/bin/pip" install --no-cache-dir -U pip wheel setuptools
   "${VENV}/bin/pip" install --no-cache-dir -r requirements.txt
 else
-  echo_yellow "[timelapse] no pyproject/setup.py/requirements.txt found; assuming self-contained"
+  echo "[timelapse] no pyproject/setup.py/requirements.txt found; assuming self-contained"
 fi
 popd >/dev/null
 
