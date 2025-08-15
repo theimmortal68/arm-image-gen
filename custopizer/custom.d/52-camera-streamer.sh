@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-set -Eeuxo pipefail
+set -euox pipefail
 export LC_ALL=C
 source /common.sh; install_cleanup_trap
 export DEBIAN_FRONTEND=noninteractive
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 PIN_FILE="/files/etc/camera-streamer.version"
 TAG_DEFAULT="0.2.8"
@@ -15,7 +16,7 @@ read_pin() {
   elif [ -n "${CAMERA_STREAMER_TAG:-}" ]; then
     t="$(printf '%s' "$CAMERA_STREAMER_TAG" | sed 's/^[vV]//' || true)"
   fi
-  # Accept X.Y or X.Y.Z optionally with -/_suffix; otherwise blank to trigger fallback
+  # Accept X.Y or X.Y.Z optionally with -/_suffix, or 'latest'; otherwise blank
   if [ -n "${t:-}" ] && ! printf '%s' "$t" | grep -Eq '^[0-9]+(\.[0-9]+){1,2}([._-][0-9A-Za-z]+)?$|^latest$'; then
     t=""
   fi
@@ -23,7 +24,6 @@ read_pin() {
 }
 
 gh_api_latest_tag() {
-  # Try jq if present; else sed/grep fallback
   local api="https://api.github.com/repos/ayufan/camera-streamer/releases/latest" tag=""
   if command -v jq >/dev/null 2>&1; then
     tag="$(curl -fsSL "$api" | jq -r '.tag_name' | sed 's/^v//' || true)"
@@ -34,12 +34,21 @@ gh_api_latest_tag() {
 }
 
 first_ok_url() {
-  # echo the first URL (args) that returns a good HEAD; empty if none
   for u in "$@"; do
     if curl -fsSLI --retry 3 --retry-delay 2 "$u" >/dev/null 2>&1; then
-      echo "$u"
-      return 0
+      echo "$u"; return 0
     fi
+  done
+  return 1
+}
+
+resolve_bin() {
+  if command -v camera-streamer >/dev/null 2>&1; then
+    command -v camera-streamer
+    return 0
+  fi
+  for p in /usr/local/bin/camera-streamer /usr/bin/camera-streamer /bin/camera-streamer; do
+    [ -x "$p" ] && { echo "$p"; return 0; }
   done
   return 1
 }
@@ -47,7 +56,6 @@ first_ok_url() {
 # --- resolve version/tag -------------------------------------------------------
 TAG="$(read_pin || true)"
 if [ -z "${TAG:-}" ] || [ "$TAG" = "latest" ]; then
-  # best-effort resolve of latest; fallback to default if API not reachable
   rtag="$(gh_api_latest_tag || true)"
   TAG="${rtag:-$TAG_DEFAULT}"
 fi
@@ -62,7 +70,6 @@ if [ -e /etc/default/raspberrypi-kernel ] || grep -qi 'raspberry pi' /proc/devic
   VARIANT="raspi"
 fi
 
-# mapping for tarball asset names
 case "$ARCH" in
   arm64|aarch64) ASSET_ARCH="linux_aarch64" ;;
   armhf|armel|arm) ASSET_ARCH="linux_armv7" ;;
@@ -88,12 +95,11 @@ CHOSEN_URL="$(first_ok_url "${DEB_CANDIDATES[@]}")" || CHOSEN_URL="$TARBALL"
 echo "[camera-streamer] resolved TAG: ${TAG}"
 echo "[camera-streamer] chosen URL: ${CHOSEN_URL}"
 
-BIN="/usr/local/bin/camera-streamer"
 TMP="$(mktemp -d)"
 
 # If a staged binary exists under /files, prefer that and skip downloads
 if [ -x /files/usr/local/bin/camera-streamer ]; then
-  install -Dm0755 /files/usr/local/bin/camera-streamer "$BIN"
+  install -Dm0755 /files/usr/local/bin/camera-streamer /usr/local/bin/camera-streamer
   echo "[camera-streamer] installed staged binary from /files"
 else
   if printf '%s' "$CHOSEN_URL" | grep -q '\.deb$'; then
@@ -101,18 +107,24 @@ else
     OUT="${TMP}/camera-streamer.deb"
     curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$OUT" "$CHOSEN_URL"
     dpkg -i "$OUT" || apt-get -y -f install
-    # ensure binary is present
-    command -v camera-streamer >/dev/null 2>&1 || { echo "[camera-streamer] dpkg installed but binary not found"; exit 1; }
   else
     # --- tarball fallback
     OUT="${TMP}/camera-streamer.tgz"
     curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$OUT" "$CHOSEN_URL"
-    tar -xzf "$OUT" -d "$TMP" -C "$TMP" || tar -xzf "$OUT" -C "$TMP"
+    tar -xzf "$OUT" -C "$TMP"
     CS_PATH="$(find "$TMP" -type f -name 'camera-streamer' -perm -111 | head -n1 || true)"
     [ -n "$CS_PATH" ] || { echo "[camera-streamer] binary not found in tarball"; ls -R "$TMP" || true; exit 1; }
-    install -Dm0755 "$CS_PATH" "$BIN"
+    install -Dm0755 "$CS_PATH" /usr/local/bin/camera-streamer
   fi
 fi
+
+# --- resolve final binary path -------------------------------------------------
+BIN="$(resolve_bin || true)"
+if [ -z "${BIN:-}" ]; then
+  echo "[camera-streamer] ERROR: camera-streamer not found in PATH after install"
+  exit 1
+fi
+echo "[camera-streamer] using binary: $BIN"
 
 # --- health checks (no hardware required) -------------------------------------
 set +e
@@ -139,7 +151,6 @@ if [ "$VARIANT" = "raspi" ]; then
   dpkg -l | awk '/^ii/ && /(libcamera|v4l2|raspberrypi)/ {printf "[pkg] %-40s %s\n",$2,$3}' || true
   ldconfig -p 2>/dev/null | grep -E 'libcamera|v4l2' || true
 
-  # Ensure KMS overlay for camera stack when using RPi kernel
   install -d /boot/firmware
   if ! grep -q '^dtoverlay=vc4-kms-v3d' /boot/firmware/config.txt 2>/dev/null; then
     echo "dtoverlay=vc4-kms-v3d" >> /boot/firmware/config.txt
