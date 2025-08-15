@@ -6,7 +6,7 @@ on:
       devices:
         description: "Comma-separated device list (e.g. rpi64,orangepi5max)"
         required: false
-        default: "rpi64,orangepi5max"
+        default: "rpi64"
 
 permissions:
   actions: read
