@@ -212,9 +212,9 @@ jobs:
           # (privileged is required for loop + device-mapper via kpartx)
           docker run --rm --privileged \
             -v "${GITHUB_WORKSPACE}/build/input.img:/image.img" \
-            --entrypoint /bin/sh \
+            --entrypoint /usr/bin/env \
             ghcr.io/octoprint/custopizer:latest \
-            -ec '
+            bash -euxo pipefail -c '
               set -euo pipefail
 
               apt-get update
