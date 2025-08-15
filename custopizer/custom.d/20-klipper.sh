@@ -15,6 +15,19 @@ export DEBIAN_FRONTEND=noninteractive
 is_in_apt git && ! is_installed git && apt-get update && apt-get install -y --no-install-recommends git ca-certificates || true
 is_in_apt python3-venv || { echo_red "[klipper] python3-venv missing"; exit 1; }
 
+# ---- New: numeric stack for Klipper & friends ----
+# Install system packages when available (Debian Bookworm / RPi repo names)
+NUM_PKGS=(python3-numpy python3-matplotlib libatlas3-base libatlas-base-dev libgfortran5)
+TO_INSTALL=()
+for pkg in "${NUM_PKGS[@]}"; do
+  is_in_apt "$pkg" && TO_INSTALL+=("$pkg") || true
+done
+if [ "${#TO_INSTALL[@]}" -gt 0 ]; then
+  apt-get update
+  apt-get install -y --no-install-recommends "${TO_INSTALL[@]}"
+fi
+# ---------------------------------------------------
+
 # Clone/update Klipper
 if [ ! -d "$HOME_DIR/klipper/.git" ]; then
   runuser -u "$KS_USER" -- git clone --depth=1 https://github.com/Klipper3d/klipper.git "$HOME_DIR/klipper"
@@ -29,6 +42,10 @@ if [ ! -d "$HOME_DIR/klippy-env" ]; then
 fi
 runuser -u "$KS_USER" -- "$HOME_DIR/klippy-env/bin/pip" install -U pip wheel setuptools
 runuser -u "$KS_USER" -- "$HOME_DIR/klippy-env/bin/pip" install -r "$HOME_DIR/klipper/scripts/klippy-requirements.txt"
+
+# ---- New: ensure latest NumPy in the venv ----
+runuser -u "$KS_USER" -- "$HOME_DIR/klippy-env/bin/pip" install --no-cache-dir -U numpy
+# ----------------------------------------------
 
 # Default config
 install -d -o "$KS_USER" -g "$KS_USER" "$HOME_DIR/printer_data/config" "$HOME_DIR/printer_data/logs"
