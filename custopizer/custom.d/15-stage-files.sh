@@ -93,4 +93,3 @@ if [ -d "${FILES_DIR}" ]; then
 else
   echo_yellow "[15-stage-files] No overlay directory at ${FILES_DIR}; skipping."
 fi
-```0
