@@ -1,57 +1,71 @@
 #!/usr/bin/env bash
-set -Eeuxo pipefail
+set -Eeuo pipefail
+set -x
 export LC_ALL=C
+# shellcheck disable=SC1091
 source /common.sh; install_cleanup_trap
+export DEBIAN_FRONTEND=noninteractive
 
-[ -d /files ] || { echo "[files] no /files mount; nothing to stage"; exit 0; }
-[ -f /etc/ks-user.conf ] && . /etc/ks-user.conf || true
-KS_USER="${KS_USER:-pi}"
+# /files is bind-mounted by CustoPiZer. Only copy what’s present, and gate Pi-only bits.
+has_pi_repo() {
+  grep -q 'archive\.raspberrypi\.com' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null
+}
+is_pi_image() {
+  [ -e /etc/default/raspberrypi-kernel ] && return 0
+  grep -qi 'raspberry pi' /proc/device-tree/model 2>/dev/null && return 0
+  return 1
+}
 
-# 1) Units list
-if [ -f /files/etc/ks-enable-units.txt ]; then
-  install -Dm0644 /files/etc/ks-enable-units.txt /etc/ks-enable-units.txt
-  echo "[files] installed /etc/ks-enable-units.txt"
+# ---- APT pins (only if the Pi repo is active) ----
+if [ -d /files/etc/apt/preferences.d ]; then
+  if has_pi_repo; then
+    install -d /etc/apt/preferences.d
+    cp -a /files/etc/apt/preferences.d/* /etc/apt/preferences.d/ || true
+    echo "[files] installed APT pins (raspberrypi.com detected)"
+  else
+    echo "[files] skipping APT pins (raspberrypi.com not in sources)"
+  fi
 fi
 
-# 2) Crowsnest config
-if [ -f /files/etc/crowsnest.conf ]; then
-  install -Dm0644 /files/etc/crowsnest.conf /etc/crowsnest.conf
-  echo "[files] installed /etc/crowsnest.conf"
+# ---- Udev rules ----
+if [ -d /files/etc/udev/rules.d ]; then
+  install -d /etc/udev/rules.d
+  cp -a /files/etc/udev/rules.d/* /etc/udev/rules.d/ || true
+  echo "[files] installed udev rules"
 fi
 
-# 3) Nginx site
-if [ -f /files/etc/nginx/sites-available/mainsail ]; then
-  install -Dm0644 /files/etc/nginx/sites-available/mainsail /etc/nginx/sites-available/mainsail
-  install -d /etc/nginx/sites-enabled
-  ln -sf /etc/nginx/sites-available/mainsail /etc/nginx/sites-enabled/mainsail
-  echo "[files] installed nginx site mainsail"
+# ---- Logrotate snippets ----
+if [ -d /files/etc/logrotate.d ]; then
+  install -d /etc/logrotate.d
+  cp -a /files/etc/logrotate.d/* /etc/logrotate.d/ || true
+  echo "[files] installed logrotate configs"
 fi
 
-# 4) Boot firmware append
-if [ -f /files/boot/firmware/config.txt.append ]; then
-  install -d /boot/firmware
+# ---- Systemd unit files (enable later in 99-enable-units) ----
+if [ -d /files/etc/systemd/system ]; then
+  install -d /etc/systemd/system
+  cp -a /files/etc/systemd/system/* /etc/systemd/system/ || true
+  echo "[files] installed systemd units"
+fi
+
+# ---- Boot firmware append (Pi only) ----
+if [ -f /files/boot/firmware/config.txt.append ] \
+   && [ -f /boot/firmware/config.txt ] \
+   && is_pi_image; then
   cat /files/boot/firmware/config.txt.append >> /boot/firmware/config.txt
   echo "[files] appended to /boot/firmware/config.txt"
+else
+  echo "[files] skipping /boot/firmware/config.txt append (non-Pi or file missing)"
 fi
 
-# 5) Udev rules
-if [ -f /files/etc/udev/rules.d/99-video-perms.rules ]; then
-  install -Dm0644 /files/etc/udev/rules.d/99-video-perms.rules /etc/udev/rules.d/99-video-perms.rules
-  echo "[files] installed /etc/udev/rules.d/99-video-perms.rules"
-fi
+# ---- Any other static payloads you’ve staged ----
+# Examples (copy if present; harmless no-ops otherwise)
+for d in etc/default etc/sysctl.d usr/local/bin usr/local/lib; do
+  if [ -d "/files/$d" ]; then
+    install -d "/$d"
+    cp -a "/files/$d/"* "/$d/" || true
+    echo "[files] installed /$d payloads"
+  fi
+done
 
-# 6) User SSH keys
-if [ -n "${KS_USER:-}" ] && [ -f "/files/home/${KS_USER}/.ssh/authorized_keys" ]; then
-  install -d -m 0700 -o "$KS_USER" -g "$KS_USER" "/home/${KS_USER}/.ssh"
-  install -m 0600 -o "$KS_USER" -g "$KS_USER" "/files/home/${KS_USER}/.ssh/authorized_keys" "/home/${KS_USER}/.ssh/authorized_keys"
-  echo "[files] installed authorized_keys for ${KS_USER}"
-fi
-
-# APT pins (optional)
-if [ -d /files/etc/apt/preferences.d ]; then
-  install -d /etc/apt/preferences.d
-  cp -a /files/etc/apt/preferences.d/* /etc/apt/preferences.d/ || true
-  echo "[files] installed APT pins"
-fi
-
-echo "[files] staging complete"
+echo "[files] stage complete"
