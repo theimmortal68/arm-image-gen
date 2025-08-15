@@ -52,8 +52,8 @@ jobs:
     env:
       DEVICE: ${{ matrix.device }}
       # Optional pins; adjust if you want different versions
-      MM_TAG: "1.0.7"
-      BDEB_REF: "v0.24.0"
+      MM_TAG: "1.5.7"
+      BDEB_REF: "v0.7.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
