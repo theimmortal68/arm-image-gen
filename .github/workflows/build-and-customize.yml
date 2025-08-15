@@ -67,7 +67,8 @@ jobs:
           sudo apt-get install -y \
             qemu-user-static binfmt-support qemu-utils kpartx dosfstools \
             parted e2fsprogs rsync xz-utils ca-certificates curl git \
-            arch-test pandoc
+            arch-test pandoc jq unzip util-linux udev mount kmod file \
+            perl python3-pip debian-archive-keyring gnupg
 
       - name: Enable binfmts (arm/arm64)
         run: |
