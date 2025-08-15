@@ -244,6 +244,7 @@ jobs:
               umount /mnt/rootfs
               kpartx -dv "$LOOP"
               losetup -d "$LOOP"
+            '
 
       - name: Generate CustoPiZer config.local
         shell: bash
