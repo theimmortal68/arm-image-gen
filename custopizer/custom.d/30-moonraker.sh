@@ -1,96 +1,71 @@
-#!/bin/bash
-set -Eeuxo pipefail
+#!/usr/bin/env bash
+set -euxo pipefail
 export LC_ALL=C
+
+# Standard project header
 source /common.sh; install_cleanup_trap
 
-# Detect user
+# ---- Target user/home (same convention as your other scripts)
 [ -f /etc/ks-user.conf ] && . /etc/ks-user.conf || true
 KS_USER="${KS_USER:-pi}"
 HOME_DIR="$(getent passwd "$KS_USER" | cut -d: -f6)"
 [ -n "$HOME_DIR" ] || { echo_red "[moonraker] user $KS_USER missing"; exit 1; }
 
 export DEBIAN_FRONTEND=noninteractive
-is_in_apt git && ! is_installed git && apt-get update && apt-get install -y --no-install-recommends git ca-certificates || true
-is_in_apt python3-venv || { echo_red "[moonraker] python3-venv missing"; exit 1; }
 
-# Clone/update Moonraker
+# ---- Minimal prerequisites; installer handles the rest
+apt-get update
+apt-get install -y --no-install-recommends \
+  git curl wget ca-certificates python3-venv python3-dev build-essential libffi-dev
+
+# ---- Ensure Moonraker data path exists (matches docs: ~/printer_data/**)
+runuser -u "$KS_USER" -- bash -lc '
+  set -eux
+  mkdir -p ~/printer_data/{config,logs,gcodes,systemd,comms}
+  # create empty config if missing; installer can also create it
+  [ -e ~/printer_data/config/moonraker.conf ] || : > ~/printer_data/config/moonraker.conf
+'
+
+# ---- Install Moonraker "from source" (doc-preferred for bleeding edge / extensions)
+#      cd ~ ; git clone https://github.com/Arksine/moonraker.git ; ~/moonraker/scripts/install-moonraker.sh
 if [ ! -d "$HOME_DIR/moonraker/.git" ]; then
   runuser -u "$KS_USER" -- git clone --depth=1 https://github.com/Arksine/moonraker.git "$HOME_DIR/moonraker"
 else
-  runuser -u "$KS_USER" -- git -C "$HOME_DIR/moonraker" fetch --depth=1 origin || true
-  runuser -u "$KS_USER" -- git -C "$HOME_DIR/moonraker" reset --hard origin/master || true
+  runuser -u "$KS_USER" -- bash -lc 'cd ~/moonraker && git fetch --tags --prune && git reset --hard @{u} || true'
 fi
 
-# venv
-if [ ! -d "$HOME_DIR/moonraker-env" ]; then
-  runuser -u "$KS_USER" -- python3 -m venv "$HOME_DIR/moonraker-env"
-fi
-runuser -u "$KS_USER" -- "$HOME_DIR/moonraker-env/bin/pip" install -U pip wheel setuptools
-runuser -u "$KS_USER" -- "$HOME_DIR/moonraker-env/bin/pip" install -r "$HOME_DIR/moonraker/scripts/moonraker-requirements.txt"
+# In image build/chroot we don’t want systemctl actions; ask installer to skip them (-z).
+# Also install Python speedups (-s) per docs.
+bash -lc "
+  set -eux
+  MOONRAKER_DISABLE_SYSTEMCTL=1 \
+  ${HOME_DIR}/moonraker/scripts/install-moonraker.sh -z -s
+"
 
-# moonraker.conf basics
-MOON_CFG="$HOME_DIR/printer_data/config/moonraker.conf"
-install -d "$(dirname "$MOON_CFG")"
-touch "$MOON_CFG"; chown "$KS_USER:$KS_USER" "$MOON_CFG"
-grep -q '^\[server\]' "$MOON_CFG" || cat >>"$MOON_CFG" <<'EOF'
+# ---- Make sure the user is in the admin group used by polkit rules
+getent group moonraker-admin >/dev/null 2>&1 && usermod -aG moonraker-admin "$KS_USER" || true
 
-[server]
-host: 0.0.0.0
-port: 7125
-EOF
-grep -q '^\[authorization\]' "$MOON_CFG" || echo -e "\n[authorization]\nenabled: true\n" >>"$MOON_CFG"
-grep -q '^\[octoprint_compat\]' "$MOON_CFG" || echo -e "\n[octoprint_compat]\n" >>"$MOON_CFG"
-
-# Update manager entries
-if ! grep -q "^\[update_manager klipper\]" "$MOON_CFG"; then
-  cat >>"$MOON_CFG" <<'EOF'
-
-[update_manager klipper]
-type: git_repo
-path: ~/klipper
-origin: https://github.com/Klipper3d/klipper.git
-managed_services: klipper
-EOF
-fi
-
-# (Optional) plugin entries to allow in-UI install/update
-if ! grep -q "^\[update_manager moonraker-timelapse\]" "$MOON_CFG"; then
-  cat >>"$MOON_CFG" <<'EOF'
-
-[update_manager moonraker-timelapse]
-type: git_repo
-path: ~/moonraker-timelapse
-origin: https://github.com/mainsail-crew/moonraker-timelapse.git
-managed_services: moonraker
-primary_branch: master
-EOF
-fi
-
-if ! grep -q "^\[update_manager sonar\]" "$MOON_CFG"; then
-  cat >>"$MOON_CFG" <<'EOF'
-
-[update_manager sonar]
-type: git_repo
-path: ~/sonar
-origin: https://github.com/mainsail-crew/sonar.git
-managed_services: moonraker
-primary_branch: master
-EOF
-fi
-
-# Service
-cat >/etc/systemd/system/moonraker.service <<EOF
-[Unit]
-Description=Moonraker API Server
-After=network-online.target klipper.service
-Wants=network-online.target
+# ---- Systemd override with modest resource limits (keeps serial responsive)
+install -d -m 0755 /etc/systemd/system/moonraker.service.d
+cat >/etc/systemd/system/moonraker.service.d/override.conf <<'EOF'
 [Service]
-User=$KS_USER
-ExecStart=$HOME_DIR/moonraker-env/bin/python $HOME_DIR/moonraker/moonraker/moonraker.py -c $MOON_CFG
-Restart=always
-[Install]
-WantedBy=multi-user.target
+LimitNOFILE=65536
+TasksMax=4096
+Nice=-2
+IOSchedulingClass=best-effort
+IOSchedulingPriority=2
+
+# Keep hardening modest; Moonraker needs device/network access
+NoNewPrivileges=yes
+PrivateTmp=yes
 EOF
-ln -sf /etc/systemd/system/moonraker.service /etc/systemd/system/multi-user.target.wants/moonraker.service || true
-systemctl_if_exists daemon-reload || true
-echo_green "[moonraker] installed"
+
+# ---- Logrotate for moonraker.log (align with ~/printer_data layout)
+install -D -m 0644 /dev/null /etc/logrotate.d/moonraker
+cat >/etc/logrotate.d/moonraker <<EOF
+${HOME_DIR}/printer_data/logs/moonraker.log {
+    daily
+    rotate 7
+    size 25M
+    missingok
+    notifempty
