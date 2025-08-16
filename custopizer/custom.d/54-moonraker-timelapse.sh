@@ -1,42 +1,67 @@
 #!/usr/bin/env bash
+# 36-moonraker-timelapse.sh — Install moonraker-timelapse during Build & Customize (chroot-safe)
 set -euxo pipefail
 export LC_ALL=C
-
-source /common.sh; install_cleanup_trap
-
-[ -f /etc/ks-user.conf ] && . /etc/ks-user.conf
-: "${KS_USER:=pi}"
-: "${HOME_DIR:=/home/${KS_USER}}"
-
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends git make ca-certificates ffmpeg
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-runuser -u "${KS_USER}" -- bash -lc '
-  set -euo pipefail
-  cd "$HOME"
-  git clone --depth=1 https://github.com/mainsail-crew/moonraker-timelapse.git
+# Optional helpers
+[ -r /common.sh ] && source /common.sh && install_cleanup_trap
+
+### 0) System deps & sudo setup (avoid interactive sudo prompts) ###
+apt-get update
+apt-get install -y --no-install-recommends \
+  sudo git curl ffmpeg build-essential ca-certificates
+# (ffmpeg is required for encoding; build-essential helps if any native wheels are built)
+rm -rf /var/lib/apt/lists/*
+
+# Ensure sudoers.d is sane and pi can sudo non-interactively for installer operations
+install -d -m 0750 -o root -g root /etc/sudoers.d
+chown root:root /etc/sudoers.d
+chmod 0750 /etc/sudoers.d
+install -D -m 0440 /dev/stdin /etc/sudoers.d/010_pi-mrtimelapse <<'EOF'
+pi ALL=(root) NOPASSWD:/usr/bin/apt,/usr/bin/apt-get,/usr/bin/systemctl,/usr/sbin/service,/usr/bin/journalctl
+EOF
+
+### 1) Clone or refresh repo as pi (ownership matters) ###
+runuser -u pi -- bash -lc '
+  set -eux
+  if [ ! -d "$HOME/moonraker-timelapse/.git" ]; then
+    git clone --depth=1 https://github.com/mainsail-crew/moonraker-timelapse.git "$HOME/moonraker-timelapse"
+  else
+    git -C "$HOME/moonraker-timelapse" fetch --depth=1 origin
+    git -C "$HOME/moonraker-timelapse" reset --hard origin/master
+  fi
 '
 
-bash -lc "
-  set -euo pipefail
-  cd '${HOME_DIR}/moonraker-timelapse'
-  make install
-"
-
-# Update Manager fragment
-UMDIR="${HOME_DIR}/printer_data/config/update-manager.d"
-install -d -o "${KS_USER}" -g "${KS_USER}" -m 0755 "${UMDIR}"
-cat > "${UMDIR}/timelapse.conf" <<EOF
-[update_manager timelapse]
-type: git_repo
-primary_branch: main
-path: ${HOME_DIR}/moonraker-timelapse
-origin: https://github.com/mainsail-crew/moonraker-timelapse.git
-managed_services: klipper moonraker
+### 2) systemctl shim inside chroot (so installer doesn’t fail trying to touch services) ###
+install -D -m 0755 /dev/stdin /usr/local/sbin/systemctl <<'EOF'
+#!/usr/bin/env bash
+if command -v /bin/systemctl >/dev/null 2>&1 && /bin/systemctl --version >/dev/null 2>&1; then
+  exec /bin/systemctl "$@"
+fi
+# Pretend success in chroot
+case "$1" in
+  enable|disable|daemon-reload|is-enabled|start|stop|restart|reload) exit 0 ;;
+  *) exit 0 ;;
+esac
 EOF
-chown "${KS_USER}:${KS_USER}" "${UMDIR}/timelapse.conf"
-chmod 0644 "${UMDIR}/timelapse.conf"
 
-systemctl_if_exists daemon-reload || true
-echo_green "[moonraker-timelapse] installed; UM fragment written"
+### 3) Run installer as *pi* (NOT root) ###
+runuser -u pi -- bash -lc '
+  set -eux
+  cd "$HOME/moonraker-timelapse"
+  # Run exactly as user; the installer will sudo internally when needed
+  make install
+'
+
+### 4) Enable at boot on the device (best-effort) ###
+if [ -f /etc/systemd/system/moonraker-timelapse.service ]; then
+  install -d -m 0755 /etc/systemd/system/multi-user.target.wants
+  ln -sf ../moonraker-timelapse.service /etc/systemd/system/multi-user.target.wants/moonraker-timelapse.service
+fi
+
+### 5) Clean up shim so the real systemctl is used on-device ###
+rm -f /usr/local/sbin/systemctl
+
+echo "[timelapse] Installed. Verify config under /home/pi/printer_data/config after first boot."
