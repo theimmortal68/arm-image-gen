@@ -36,6 +36,18 @@ bash -lc "
   cd '${HOME_DIR}/moonraker-timelapse'
   make install
 "
+# Seed a default timelapse.conf if missing (user-owned)
+TL_CFG="${HOME_DIR}/printer_data/config/timelapse.conf"
+if [ ! -e "${TL_CFG}" ]; then
+  install -D -o "${KS_USER}" -g "${KS_USER}" -m 0644 /dev/null "${TL_CFG}"
+  cat >> "${TL_CFG}" <<'EOF'
+# Moonraker Timelapse defaults
+[timelapse]
+ffmpeg_binary_path: /usr/bin/ffmpeg
+# output_path: ~/printer_data/timelapse
+# enable_async_render: True
+EOF
+fi
 
 # Add/refresh Moonraker Update Manager block exactly as upstream shows
 CFG_DIR="${HOME_DIR}/printer_data/config"
