@@ -64,11 +64,13 @@ runuser -u "$KS_USER" -- bash -lc '
   ~/klippy-env/bin/pip install --upgrade numpy
 '
 
-# Precompile Python & build C helper
-runuser -u "$KS_USER" -- bash -lc '
+# inside your chroot klipper script
+runuser -u pi -- bash -lc '
   set -eux
   cd ~/klipper
-  ~/klippy-env/bin/python -m compileall -q -j 0 klippy
+  # Single-process compile (no -j). Avoids SemLock.
+  ~/klippy-env/bin/python -m compileall -q klippy
+  # Build C helpers with cffi as the pi user so ownership is correct
   ~/klippy-env/bin/python klippy/chelper/__init__.py
 '
 
