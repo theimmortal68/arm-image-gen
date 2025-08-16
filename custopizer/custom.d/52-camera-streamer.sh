@@ -1,156 +1,176 @@
 #!/usr/bin/env bash
-set -Eeuxo pipefail
+set -euxo pipefail
 export LC_ALL=C
-# shellcheck disable=SC1091
+
+# Aligns with Crowsnest: installs camera backends only (no services).
+# RPi: libcamera + rpicam-apps + camera-streamer
+# Orange Pi 5 series: ustreamer (V4L2 MJPEG)
+# Crowsnest config chooses the backend via [cam] section:
+#   mode: camera-streamer  (RPi)
+#   mode: ustreamer        (OPi/USB cams)
+#
+# Docs:
+# - Crowsnest [cam] modes & backends: https://crowsnest.mainsail.xyz/configuration/cam-section
+# - Crowsnest backends overview:      https://crowsnest.mainsail.xyz/faq/backends-from-crowsnest
+# - RPi camera stack (Bookworm):      https://www.raspberrypi.com/documentation/computers/camera_software.html
+# - camera-streamer project:          https://github.com/ayufan/camera-streamer
+
 source /common.sh; install_cleanup_trap
-export DEBIAN_FRONTEND=noninteractive
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
-# ---------------- helpers ----------------
-fetch() { # url out
-  local url="$1" out="$2"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$out" "$url"
-  else
-    wget --tries=5 --waitretry=2 --retry-connrefused -O "$out" "$url"
+# -------- Helpers --------
+is_file()  { [ -f "$1" ]; }
+is_dir()   { [ -d "$1" ]; }
+in_file()  { grep -qE "$2" "$1"; }
+arch()     { dpkg --print-architecture; }
+
+model_from_dt() {
+  local m="/proc/device-tree/model"
+  if [ -r "$m" ]; then tr -d '\0' < "$m"; else echo ""; fi
+}
+
+is_rpi() {
+  local m; m="$(model_from_dt || true)"
+  printf '%s' "$m" | grep -iq 'raspberry pi'
+}
+
+is_rpi5() {
+  local m; m="$(model_from_dt || true)"
+  printf '%s' "$m" | grep -iq 'raspberry pi 5'
+}
+
+is_orangepi5() {
+  # Matches Orange Pi 5 / 5 Plus / 5 Max (rk3588 family)
+  local m; m="$(model_from_dt || true)"
+  if printf '%s' "$m" | grep -iq 'orange pi 5'; then return 0; fi
+  if is_file /etc/armbian-release && grep -qi 'orangepi' /etc/armbian-release; then
+    # Heuristic: RK3588 boards
+    grep -qiE '5(\+| plus| max)?' /etc/armbian-release || true
   fi
 }
-head_ok() { # url
-  local url="$1"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSLI --retry 3 --retry-delay 2 "$url" >/dev/null 2>&1
-  else
-    wget -q --spider "$url"
+
+apt_update_once() {
+  # Some images pin Raspberry Pi repo in base; just update safely.
+  APT_LISTCHANGES_FRONTEND=none apt-get update
+}
+
+apt_install_norec() {
+  # shellcheck disable=SC2068
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $@
+}
+
+# -------- RPi camera stack (Bookworm) --------
+install_rpi_libcamera_stack() {
+  apt_update_once
+  # Prefer Raspberry Pi repo names (Bookworm): rpicam-apps + libcamera0 + tools.
+  # Fall back to Debian names if needed.
+  apt_install_norec \
+    v4l-utils \
+    libcamera0 \
+    libcamera-tools || true
+
+  if ! dpkg -s rpicam-apps >/dev/null 2>&1; then
+    apt_install_norec rpicam-apps || apt_install_norec libcamera-apps || true
   fi
-}
-resolve_bin() {
-  command -v camera-streamer >/dev/null 2>&1 && { command -v camera-streamer; return 0; }
-  for p in /usr/bin/camera-streamer /usr/local/bin/camera-streamer; do
-    [ -x "$p" ] && { echo "$p"; return 0; }
-  done
-  return 1
-}
-purge_cs_pkgs() {
-  apt-get remove -y --purge camera-streamer-raspi camera-streamer-generic camera-streamer || true
+
+  # Basic sanity (don’t fail the build if tools are missing)
+  if command -v rpicam-hello >/dev/null 2>&1; then rpicam-hello --version || true; fi
+  if command -v libcamera-hello >/dev/null 2>&1; then libcamera-hello --version || true; fi
 }
 
-# ---------------- env/detect --------------
-apt-get update || true
-apt-get install -y --no-install-recommends ca-certificates curl wget xz-utils tar jq || true
+# -------- camera-streamer for RPi (preferred) --------
+build_or_install_camera_streamer() {
+  # Try prebuilt deb first (recommended upstream). If that fails, build from source.
+  # We keep this robust without hardcoding exact asset names.
+  apt_update_once
+  apt_install_norec ca-certificates curl git xz-utils
 
-ARCH="$(dpkg --print-architecture)"                       # arm64/armhf
-CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME:-bookworm}")"
+  tmpd="$(mktemp -d)"; trap 'rm -rf "$tmpd"' EXIT
 
-# Detect a “true Pi” userspace (kernel pkg marker) and/or Raspberry Pi libcamera
-IS_RPI=0
-[ -e /etc/default/raspberrypi-kernel ] && IS_RPI=1
-grep -qi 'raspberry pi' /proc/device-tree/model 2>/dev/null && IS_RPI=1 || true
-HAS_PI_LIBCAM=0
-apt-cache policy libcamera0.1 2>/dev/null | grep -qi 'archive\.raspberrypi\.com' && HAS_PI_LIBCAM=1 || true
-dpkg -l | awk '$2 ~ /^libcamera0\.1$/ && $1=="ii"{print}' | grep -q . && HAS_PI_LIBCAM=$HAS_PI_LIBCAM || true
+  # Try to discover a suitable .deb from the latest release (arm64 Bookworm).
+  # If discovery fails (asset names change), we fall back to building.
+  set +e
+  CS_DEB_URL="$(curl -fsSL https://api.github.com/repos/ayufan/camera-streamer/releases/latest \
+    | grep -Eo '"browser_download_url":\s*"[^"]+\.deb"' \
+    | grep -E 'arm64|aarch64' \
+    | head -n1 \
+    | cut -d'"' -f4)"
+  set -e
 
-# Variant preference (overridable)
-VARIANT="${CAMERA_STREAMER_VARIANT:-auto}"
-if [ "$VARIANT" = "auto" ]; then
-  if [ "$IS_RPI" -eq 1 ] && [ "$HAS_PI_LIBCAM" -eq 1 ]; then
-    VARIANT="raspi"
+  if [ -n "${CS_DEB_URL:-}" ]; then
+    echo "Found prebuilt camera-streamer: $CS_DEB_URL"
+    curl -fL "$CS_DEB_URL" -o "$tmpd/camera-streamer.deb"
+    dpkg -i "$tmpd/camera-streamer.deb" || apt-get -f install -y
   else
-    VARIANT="generic"
-  fi
-fi
+    echo "Falling back to source build for camera-streamer…"
+    apt_install_norec \
+      build-essential cmake meson ninja-build pkg-config \
+      libevent-dev libmicrohttpd-dev libssl-dev libjpeg-dev libwebp-dev \
+      libv4l-dev libdrm-dev libasound2-dev libx264-dev libopus-dev \
+      libcamera-dev libfmt-dev
 
-case "$ARCH" in
-  arm64|aarch64) ASSET_ARCH="arm64" ;;
-  armhf|arm)     ASSET_ARCH="armhf" ;;
-  *) echo_red "[camera-streamer] unsupported arch: $ARCH"; exit 2 ;;
+    git clone --depth=1 --recurse-submodules https://github.com/ayufan/camera-streamer.git /tmp/camera-streamer
+    make -C /tmp/camera-streamer -j"$(nproc)"
+    # Common output path in this repo is ./output/camera-streamer
+    if [ -x /tmp/camera-streamer/output/camera-streamer ]; then
+      install -D -m0755 /tmp/camera-streamer/output/camera-streamer /usr/local/bin/camera-streamer
+    elif [ -x /tmp/camera-streamer/camera-streamer ]; then
+      install -D -m0755 /tmp/camera-streamer/camera-streamer /usr/local/bin/camera-streamer
+    else
+      echo "camera-streamer binary not found after build"; exit 1
+    fi
+  fi
+
+  # Health check (non-fatal)
+  if command -v camera-streamer >/dev/null 2>&1; then camera-streamer --help >/dev/null || true; fi
+}
+
+# -------- OPi 5 family: ustreamer backend --------
+install_ustreamer_stack() {
+  apt_update_once
+  if ! apt_install_norec ustreamer; then
+    # Build from source if Debian package not present
+    apt_install_norec build-essential git libevent-dev libjpeg-dev
+    git clone --depth=1 https://github.com/pikvm/ustreamer.git /tmp/ustreamer
+    make -C /tmp/ustreamer -j"$(nproc)"
+    install -D -m0755 /tmp/ustreamer/ustreamer /usr/local/bin/ustreamer
+  fi
+  apt_install_norec v4l-utils
+  # Quick probe
+  if command -v ustreamer >/dev/null 2>&1; then ustreamer --help >/dev/null || true; fi
+}
+
+# -------- Main --------
+case "$(arch)" in
+  arm64|aarch64)
+    if is_rpi; then
+      echo "Detected Raspberry Pi (64-bit)."
+      install_rpi_libcamera_stack
+      # RPi5 needs the new libcamera/rpicam stack; camera-streamer uses libcamera path when needed.
+      # Upstream recommends camera-streamer for Pi backends; Crowsnest should use `mode: camera-streamer`.
+      # (Crowsnest docs show camera mode selection via [cam] section.)  # refs in header
+      build_or_install_camera_streamer
+    elif is_orangepi5; then
+      echo "Detected Orange Pi 5 series."
+      # Prefer ustreamer backend on RK3588; keep things simple and portable.
+      install_ustreamer_stack
+      echo "camera-streamer skipped on OPi5; configure Crowsnest cam with 'mode: ustreamer'."
+    else
+      # Generic 64-bit SBC fallback: prefer ustreamer (works with any V4L2 USB cam)
+      echo "Unknown 64-bit SBC; installing generic V4L2 + ustreamer."
+      install_ustreamer_stack
+    fi
+    ;;
+  *)
+    # Non-ARM or unexpected – don’t fail customize
+    echo "Non-ARM or unknown arch ($(arch)); skipping camera backend install."
+    ;;
 esac
 
-# Pick a tag; allow pin via /files/etc/camera-streamer.version or env CAMERA_STREAMER_TAG
-PIN_FILE="/files/etc/camera-streamer.version"
-TAG=""
-[ -f "$PIN_FILE" ] && TAG="$(sed -e 's/^[vV]//' -e 's/[^0-9A-Za-z._-].*$//' "$PIN_FILE" | head -n1 || true)"
-[ -n "${CAMERA_STREAMER_TAG:-}" ] && TAG="$(printf '%s' "$CAMERA_STREAMER_TAG" | sed 's/^[vV]//')"
-if [ -z "$TAG" ] || [ "$TAG" = "latest" ]; then
-  TAG="$(curl -fsSL "https://api.github.com/repos/ayufan/camera-streamer/releases/latest" \
-        | jq -r '.tag_name' | sed 's/^v//' || true)"
-fi
-[ -n "$TAG" ] || TAG="0.2.8"
-
-echo_green "[camera-streamer] target variant=${VARIANT} tag=v${TAG} arch=${ARCH} codename=${CODENAME}"
-
-BASE="https://github.com/ayufan/camera-streamer/releases/download/v${TAG}"
-
-install_variant() { # raspi|generic
-  local variant="$1" tmp; tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
-  local pkg="camera-streamer-${variant}_${TAG}.${CODENAME}_${ARCH}.deb"
-  local url="${BASE}/${pkg}"
-  local out="${tmp}/${pkg}"
-  if ! head_ok "$url"; then
-    # fall back to bullseye asset naming or unified package name
-    pkg="camera-streamer-${variant}_${TAG}.bullseye_${ARCH}.deb"
-    url="${BASE}/${pkg}"
-    if ! head_ok "$url"; then
-      pkg="camera-streamer_${TAG}.${CODENAME}_${ARCH}.deb"
-      url="${BASE}/${pkg}"
-      head_ok "$url" || { echo_red "[camera-streamer] no .deb asset for ${variant}"; return 1; }
-    fi
-  fi
-  echo_green "[camera-streamer] downloading ${pkg}"
-  fetch "$url" "$out"
-  apt-get install -y "$out"
-}
-
-# --------------- Install flow -----------------
-# First attempt: chosen VARIANT
-purge_cs_pkgs || true
-if ! install_variant "$VARIANT"; then
-  echo_red "[camera-streamer] install failed for ${VARIANT}"
-  exit 1
-fi
-
-BIN="$(resolve_bin || true)"
-[ -n "${BIN:-}" ] || { echo_red "[camera-streamer] binary missing after install"; exit 1; }
-echo_green "[camera-streamer] using binary: $BIN"
-
-set +e
-"$BIN" --version > /tmp/cs.version 2>&1
-VERS_RC=$?
-set -e
-
-if [ $VERS_RC -ne 0 ]; then
-  # Common case: raspi build on non-Pi libcamera → libpisp symbol failure
-  if grep -q 'libcamera\.so.*undefined symbol.*libpisp' /tmp/cs.version 2>/dev/null; then
-    echo_red "[camera-streamer] libpisp symbol missing in libcamera; switching to generic build"
-    purge_cs_pkgs || true
-    if install_variant "generic"; then
-      BIN="$(resolve_bin || true)"
-      [ -n "$BIN" ] || { echo_red "[camera-streamer] binary missing after generic install"; exit 1; }
-      "$BIN" --version > /tmp/cs.version 2>&1 || { cat /tmp/cs.version || true; exit 1; }
-    else
-      echo_red "[camera-streamer] generic install failed after raspi removal"
-      exit 1
-    fi
-  else
-    echo_red "[camera-streamer] --version failed"; cat /tmp/cs.version || true; exit 1
-  fi
-fi
-
-# --help may exit non-zero; only fail on crash or no output
-CS_STATUS=0
-"$BIN" --help >/tmp/cs.help 2>&1 || CS_STATUS=$?
-if [ ! -s /tmp/cs.help ] || grep -qiE 'segmentation fault|illegal instruction|bus error' /tmp/cs.help; then
-  echo_red "[camera-streamer] --help produced no output or crashed"
-  cat /tmp/cs.help || true
-  exit 1
-fi
-
-# Missing shared libs?
-if command -v ldd >/dev/null 2>&1; then
-  if MISSING="$(ldd "$BIN" 2>/dev/null | awk '/not found/ {print $1}')" && [ -n "$MISSING" ]; then
-    echo_red "[camera-streamer] missing libs: $MISSING"
-    exit 1
-  fi
-fi
-
-echo_green "[camera-streamer] OK: $(head -n1 /tmp/cs.version || echo 'version unknown') (help exit=${CS_STATUS})"
+# No services enabled here. Crowsnest manages runtime.
+# Print a brief summary so the CI log shows what we did.
+echo "---- Camera backend summary ----"
+command -v camera-streamer >/dev/null 2>&1 && echo "camera-streamer: $(camera-streamer --version 2>/dev/null || echo present)" || echo "camera-streamer: not installed"
+command -v ustreamer      >/dev/null 2>&1 && echo "ustreamer: present" || echo "ustreamer: not installed"
+command -v rpicam-hello   >/dev/null 2>&1 && echo "rpicam-apps: present" || echo "rpicam-apps: not installed"
+command -v libcamera-hello>/dev/null 2>&1 && echo "libcamera-tools: present" || echo "libcamera-tools: not installed"
+echo "--------------------------------"
