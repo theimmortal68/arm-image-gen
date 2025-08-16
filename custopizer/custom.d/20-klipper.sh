@@ -13,10 +13,14 @@ HOME_DIR="$(getent passwd "$KS_USER" | cut -d: -f6)"
 export DEBIAN_FRONTEND=noninteractive
 
 echo_green "[klipper] installing host-side dependencies"
-check_install_pkgs \
+set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \
   git python3-venv python3-dev build-essential gcc g++ make libffi-dev \
   python3-numpy python3-matplotlib libatlas3-base libatlas-base-dev libgfortran5 \
   ca-certificates curl pkg-config
+rm -rf /var/lib/apt/lists/*
 
 # Group memberships for hardware access
 for grp in dialout tty input video render gpio i2c spi; do
