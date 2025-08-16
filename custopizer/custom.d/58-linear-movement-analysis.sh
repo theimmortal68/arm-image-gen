@@ -5,10 +5,8 @@ export LC_ALL=C
 source /common.sh; install_cleanup_trap
 
 # Klipper Linear Movement Vibrations Analysis
-# Repo: https://github.com/worksasintended/klipper_linear_movement_analysis
-# Adds GCODE commands:
-#   MEASURE_LINEAR_VIBRATIONS
-#   MEASURE_LINEAR_VIBRATIONS_RANGE
+# Upstream docs: clone then run the repo's install.sh. :contentReference[oaicite:0]{index=0}
+# We run everything as the target user; no sudo inside chroot.
 
 # Target user/home
 # shellcheck disable=SC1091
@@ -18,35 +16,28 @@ source /common.sh; install_cleanup_trap
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Minimal deps (git+pip). Numeric libs (numpy/matplotlib/atlas/fortran) are handled in 20-klipper.sh
+# Minimal prereqs to fetch and run installer
 apt-get update
-apt-get install -y --no-install-recommends git ca-certificates python3-pip
+apt-get install -y --no-install-recommends git ca-certificates curl
 
-# Clone (no idempotence: will error if dir exists)
+# Clone (no idempotence: will error if dir already exists)
 runuser -u "${KS_USER}" -- bash -lc '
   set -euo pipefail
   cd "$HOME"
   git clone --depth=1 https://github.com/worksasintended/klipper_linear_movement_analysis.git
 '
 
-# Install Python requirements into the Klipper venv, then run upstream install.sh
-# (install.sh copies the module into Klipper’s extras and does any repo-specific steps)
+# Run upstream installer (handles copying module, python deps, etc.)
+# NOTE: Installation (matplotlib build) is heavy; avoid doing this while printing. :contentReference[oaicite:1]{index=1}
 runuser -u "${KS_USER}" -- bash -lc '
   set -euo pipefail
-  VENV="$HOME/klippy-env"
-  test -x "$VENV/bin/pip"
-  "$VENV/bin/pip" install -U pip
-  if [ -f "$HOME/klipper_linear_movement_analysis/requirements.txt" ]; then
-    "$VENV/bin/pip" install --prefer-binary -r "$HOME/klipper_linear_movement_analysis/requirements.txt"
-  fi
-  cd "$HOME/klipper_linear_movement_analysis"
-  bash ./install.sh
+  bash "$HOME/klipper_linear_movement_analysis/install.sh"
 '
 
-# Ensure an output directory users can access via the UI
+# Ensure an output directory visible in UIs (matches README example path)
 install -d -o "${KS_USER}" -g "${KS_USER}" "${HOME_DIR}/printer_data/config/linear_vibrations"
 
-# Add/refresh a Moonraker Update Manager block (normalized name without the README typo)
+# Add/refresh Moonraker Update Manager block
 CFG_DIR="${HOME_DIR}/printer_data/config"
 CFG="${CFG_DIR}/moonraker.conf"
 install -d -o "${KS_USER}" -g "${KS_USER}" "${CFG_DIR}"
@@ -82,4 +73,4 @@ if [ -d "${HOME_DIR}/klipper_linear_movement_analysis/.git" ]; then
 fi
 
 systemctl_if_exists daemon-reload || true
-echo_green "[KLMA] installed; Update Manager block added; output dir ready"
+echo_green "[KLMA] installed via upstream install.sh; Update Manager configured"
