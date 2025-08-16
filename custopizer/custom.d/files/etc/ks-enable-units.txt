@@ -3,4 +3,5 @@ klipper.service
 moonraker.service
 crowsnest.service
 moonraker-timelapse.service
-# sonar.service
+sonar.service
+can@can0.service
