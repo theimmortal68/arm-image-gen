@@ -6,14 +6,21 @@ source /common.sh; install_cleanup_trap
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends iproute2
+apt-get install -y --no-install-recommends iproute2 can-utils
+rm -rf /var/lib/apt/lists/*
 
-# Core SocketCAN modules (best-effort)
-modprobe can || true
-modprobe can_raw || true
+# Load CAN modules at boot on the target system (don't modprobe during image build)
+install -D -m 0644 /dev/stdin /etc/modules-load.d/klipper-can.conf <<'EOF'
+can
+can_raw
+# Uncomment if needed:
+# gs_usb
+# slcan
+EOF
 
 # Helper that (re)configures a CAN interface using /etc/default/<ifname>
-install -D -m 0755 /usr/local/sbin/can-setup.sh <<'EOS'
+# (fixed: provide a source to `install` via /dev/stdin)
+install -D -m 0755 /dev/stdin /usr/local/sbin/can-setup.sh <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
 IFACE="${1:?usage: can-setup.sh <ifname>}"
@@ -75,4 +82,4 @@ EOF
 fi
 
 systemctl_if_exists daemon-reload || true
-echo_green "[canbus] Installed can@.service; edit /etc/default/can0 and enable can@can0.service via ks-enable-units or systemctl"
+echo_green "[canbus] Installed modules-load and can@.service; edit /etc/default/can0 and enable can@can0.service via ks-enable-units or systemctl"
