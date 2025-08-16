@@ -1,46 +1,73 @@
-#!/bin/bash
-set -euox pipefail
+#!/usr/bin/env bash
+set -euxo pipefail
 export LC_ALL=C
+
 source /common.sh; install_cleanup_trap
 
-# Resolve target user written by your user-setup
-BASE_USER="$(. /etc/ks-user.env; echo "${KS_USER:-pi}")"
-HOME_DIR="/home/${BASE_USER}"
+# Moonraker Timelapse (mainsail-crew)
+# Upstream install flow:
+#   cd ~
+#   git clone https://github.com/mainsail-crew/moonraker-timelapse.git
+#   cd ~/moonraker-timelapse
+#   make install
+#
+# Docs also show the Moonraker Update Manager block for in-UI updates.
 
-REPO="https://github.com/mainsail-crew/moonraker-timelapse.git"
-SRC_DIR="${HOME_DIR}/moonraker-timelapse"
-MOONRAKER_COMPONENTS="${HOME_DIR}/moonraker/moonraker/components"
-PRINTER_CFG_DIR="${HOME_DIR}/printer_data/config"
-MOONRAKER_CONFIG="${PRINTER_CFG_DIR}/moonraker.conf"
+# Target user/home (same convention as your other scripts)
+[ -f /etc/ks-user.conf ] && . /etc/ks-user.conf
+: "${KS_USER:=pi}"
+: "${HOME_DIR:=/home/${KS_USER}}"
 
+export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends git ffmpeg ca-certificates
+# make for `make install`, ffmpeg is recommended by upstream for render, plus basic tools
+apt-get install -y --no-install-recommends git make ca-certificates ffmpeg
 
-# Clone or fast-update
-if [[ ! -d "${SRC_DIR}/.git" ]]; then
-  git clone --depth=1 "${REPO}" "${SRC_DIR}"
-else
-  git -C "${SRC_DIR}" fetch --depth=1 origin
-  git -C "${SRC_DIR}" reset --hard origin/HEAD || true
+# Clone (no idempotence: error if exists)
+runuser -u "${KS_USER}" -- bash -lc '
+  set -euo pipefail
+  cd "$HOME"
+  git clone --depth=1 https://github.com/mainsail-crew/moonraker-timelapse.git
+'
+
+# Install as root (no sudo inside chroot)
+bash -lc "
+  set -euo pipefail
+  cd '${HOME_DIR}/moonraker-timelapse'
+  make install
+"
+
+# Add/refresh Moonraker Update Manager block exactly as upstream shows
+CFG_DIR="${HOME_DIR}/printer_data/config"
+CFG="${CFG_DIR}/moonraker.conf"
+install -d -o "${KS_USER}" -g "${KS_USER}" "${CFG_DIR}"
+[ -e "${CFG}" ] || install -m 0644 -o "${KS_USER}" -g "${KS_USER}" /dev/null "${CFG}"
+
+TMP=\"$(mktemp)\"
+awk '
+  BEGIN{skip=0}
+  /^\[update_manager[[:space:]]+timelapse\]/{skip=1; next}
+  skip && /^\[/{skip=0}
+  !skip{print}
+' \"${CFG}\" > \"${TMP}\"
+printf \"\n\" >> \"${TMP}\"
+cat >> \"${TMP}\" <<EOF
+[update_manager timelapse]
+type: git_repo
+primary_branch: main
+path: ${HOME_DIR}/moonraker-timelapse
+origin: https://github.com/mainsail-crew/moonraker-timelapse.git
+managed_services: klipper moonraker
+EOF
+install -m 0644 -o \"${KS_USER}\" -g \"${KS_USER}\" \"${TMP}\" \"${CFG}\"
+rm -f \"${TMP}\"
+
+# Optional: record revision
+if [ -d \"${HOME_DIR}/moonraker-timelapse/.git\" ]; then
+  rev=\"$(git -C \"${HOME_DIR}/moonraker-timelapse\" rev-parse --short HEAD || true)\"
+  install -d -m 0755 /etc
+  printf 'Moonraker-timelapse\t%s\n' \"${rev:-unknown}\" >> /etc/ks-manifest.txt
 fi
-chown -R "${BASE_USER}:${BASE_USER}" "${SRC_DIR}"
 
-# Link the Moonraker component
-install -d -o "${BASE_USER}" -g "${BASE_USER}" "${MOONRAKER_COMPONENTS}"
-ln -sf "${SRC_DIR}/component/timelapse.py" "${MOONRAKER_COMPONENTS}/timelapse.py"
-chown -h "${BASE_USER}:${BASE_USER}" "${MOONRAKER_COMPONENTS}/timelapse.py"
-
-# Link macros into printer_data/config (if that tree already exists)
-if [[ -d "${PRINTER_CFG_DIR}" ]]; then
-  ln -sf "${SRC_DIR}/klipper_macro/timelapse.cfg" "${PRINTER_CFG_DIR}/timelapse.cfg"
-  chown -h "${BASE_USER}:${BASE_USER}" "${PRINTER_CFG_DIR}/timelapse.cfg"
-fi
-
-# Append Moonraker config snippet once, if you staged it via /files
-if [[ -f "${MOONRAKER_CONFIG}" && -f /files/moonraker/timelapse.conf ]]; then
-  if ! grep -q '^\[timelapse\]' "${MOONRAKER_CONFIG}"; then
-    cat /files/moonraker/timelapse.conf >> "${MOONRAKER_CONFIG}"
-  fi
-fi
-
-echo_green "[timelapse] installed (linked component + macros)"
+systemctl_if_exists daemon-reload || true
+echo_green \"[moonraker-timelapse] installed via make; Update Manager configured\"
