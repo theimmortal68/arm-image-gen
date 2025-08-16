@@ -1,3 +1,0 @@
-Package: libcamera* libcam* rpi* raspberrypi* libraspberrypi* v4l2* libv4l*
-Pin: origin archive.raspberrypi.org
-Pin-Priority: 700
