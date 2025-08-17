@@ -84,11 +84,13 @@ py_compile_tree() {
 create_systemctl_shim() {
   install -D -m 0755 /dev/stdin /usr/local/sbin/systemctl <<'EOF'
 #!/usr/bin/env bash
-if command -v /bin/systemctl >/dev/null 2>&1 && /bin/systemctl --version >/dev/null 2>&1; then
+# Chroot-safe systemctl shim: only use real systemctl if PID 1 is systemd
+if [ -x /bin/systemctl ] && [ -r /proc/1/comm ] && grep -qx 'systemd' /proc/1/comm 2>/dev/null; then
   exec /bin/systemctl "$@"
 fi
+# No systemd: pretend success for common operations
 case "$1" in
-  enable|disable|daemon-reload|is-enabled|start|stop|restart|reload) exit 0 ;;
+  enable|disable|daemon-reload|is-enabled|start|stop|restart|reload|status) exit 0 ;;
   *) exit 0 ;;
 esac
 EOF
@@ -159,4 +161,19 @@ modules_load_dropin() {
   printf "%b" "$body" | wr_root 0644 "$dst"
 }
 
+
+# /files/ks_helpers.sh (append)
+fix_sudoers_sane() {
+  install -d -m 0750 -o root -g root /etc/sudoers.d
+  chown root:root /etc/sudoers.d
+  # Fix any pre-existing files (e.g., README) so sudo will run
+  find /etc/sudoers.d -type f -exec chown root:root {} \; -exec chmod 0440 {} \; || true
+}
+
+ensure_sudo_nopasswd_all() {
+  fix_sudoers_sane
+  install -D -m 0440 /dev/stdin "/etc/sudoers.d/999-custopizer-pi-all" <<'EOF'
+pi ALL=(ALL) NOPASSWD:ALL
+EOF
+}
 # End of ks_helpers.sh
