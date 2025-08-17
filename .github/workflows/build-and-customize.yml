@@ -15,8 +15,11 @@ permissions:
   actions: read
   contents: read
 
+env:
+  DEVICE: ${{ (github.event_name == 'workflow_dispatch' && inputs.device) || 'rpi64' }}
+
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-and-customize-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
