@@ -1,25 +1,20 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 export LC_ALL=C
+export DEBIAN_FRONTEND=noninteractive
 
 source /common.sh; install_cleanup_trap
+[ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends iproute2 can-utils
-rm -rf /var/lib/apt/lists/*
+section "Install CAN bus runtime and boot-time configuration"
 
-# Load CAN modules at boot on the target system (don't modprobe during image build)
-install -D -m 0644 /dev/stdin /etc/modules-load.d/klipper-can.conf <<'EOF'
-can
-can_raw
-# Uncomment if needed:
-# gs_usb
-# slcan
-EOF
+# Runtime tools
+apt_install iproute2 can-utils
 
-# Helper that (re)configures a CAN interface using /etc/default/<ifname>
-# (fixed: provide a source to `install` via /dev/stdin)
+# Load CAN modules at boot on the target system (no modprobe in chroot)
+modules_load_dropin klipper-can.conf "can\ncan_raw\n# gs_usb\n# slcan\n"
+
+# can-setup helper
 install -D -m 0755 /dev/stdin /usr/local/sbin/can-setup.sh <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -49,7 +44,7 @@ fi
 /sbin/ip link set "$IFACE" up
 EOS
 
-# systemd template: can@can0.service brings up can0 (works fine alongside NetworkManager)
+# systemd template: can@.service
 cat >/etc/systemd/system/can@.service <<'EOF'
 [Unit]
 Description=Bring up SocketCAN interface %i
@@ -81,5 +76,8 @@ DBITRATE=2000000
 EOF
 fi
 
+# Best-effort daemon reload and message
 systemctl_if_exists daemon-reload || true
 echo_green "[canbus] Installed modules-load and can@.service; edit /etc/default/can0 and enable can@can0.service via ks-enable-units or systemctl"
+
+apt_clean_all
