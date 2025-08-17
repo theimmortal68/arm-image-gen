@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# 53-crowsnest.sh — Crowsnest for Pi 4, Pi 5, Orange Pi 5 Max
+# 53-crowsnest.sh — Install Crowsnest for Pi 4 / Pi 5 / Orange Pi 5 Max (chroot-safe)
 set -euxo pipefail
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
 
 source /common.sh; install_cleanup_trap
+# Optional helpers
 [ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh || true
 
-# ---- local fallbacks if helpers missing ----
+# ---------- Fallback helpers if ks_helpers.sh isn't present ----------
 section() { echo; echo "=== $* ==="; } || true
 as_user() { local u="$1"; shift; runuser -u "$u" -- bash -lc "set -euxo pipefail; [ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh || true; $*"; }
 apt_update_once() { apt-get update; }
@@ -25,13 +26,15 @@ case "$1" in enable|disable|daemon-reload|is-enabled|start|stop|restart|reload|s
 EOF
 }
 remove_systemctl_shim() { rm -f /usr/local/sbin/systemctl; }
-# -------------------------------------------
+wr_pi() { local mode="$1" dst="$2"; install -D -m "$mode" /dev/stdin "$dst"; chown "${KS_USER:-pi}:${KS_USER:-pi}" "$dst" || true; }
+# --------------------------------------------------------------------
 
+# Resolve target user/home (from 02-user.sh persistence if present)
 [ -f /etc/ks-user.conf ] && . /etc/ks-user.conf || true
 : "${KS_USER:=pi}"
 : "${HOME_DIR:=/home/${KS_USER}}"
 
-# Detect board
+# Board detection (best-effort)
 MODEL="$(tr -d '\0' </sys/firmware/devicetree/base/model 2>/dev/null || true)"
 is_rpi=0; is_pi5=0; is_orangepi=0
 case "${MODEL}" in
@@ -40,10 +43,12 @@ case "${MODEL}" in
   *"OrangePi"*|*"Orange Pi"*) is_orangepi=1 ;;
 esac
 
-# Policy for camera-streamer
-# auto = Pi4/OrangePi: install; Pi5: try install, else stub; 1=force install; 0=skip (but stub to let Makefile pass)
+# Camera-streamer policy:
+#   auto: Pi 4/5/OPi5 try install prebuilt; falls back to stub on failure
+#   1   : force install attempt (falls back to stub if download fails)
+#   0   : skip install; stub (ustreamer-only)
 : "${CN_INSTALL_CAMERA_STREAMER:=auto}"
-: "${CAMERA_STREAMER_VERSION:=0.2.8}"   # known-good; override as needed
+: "${CAMERA_STREAMER_VERSION:=0.2.8}"
 
 want_cs=0
 if [ "${CN_INSTALL_CAMERA_STREAMER}" = "1" ]; then
@@ -52,7 +57,7 @@ elif [ "${CN_INSTALL_CAMERA_STREAMER}" = "0" ]; then
   want_cs=0
 else
   # auto
-  if [ "${is_pi5}" -eq 1 ]; then want_cs=1; else want_cs=1; fi
+  want_cs=1
 fi
 
 section "Install prerequisites"
@@ -72,14 +77,11 @@ as_user "${KS_USER}" '
   fi
 '
 
-section "Ensure camera backends for Crowsnest"
-as_user "${KS_USER}" '
-  set -eux
-  cd "$HOME/crowsnest"
-  install -d "$HOME/crowsnest/bin/camera-streamer" "$HOME/crowsnest/bin/ustreamer"
-'
+# Ensure backend bin dirs exist and are user-owned
+install -d -o "${KS_USER}" -g "${KS_USER}" "${HOME_DIR}/crowsnest/bin/ustreamer"
+install -d -o "${KS_USER}" -g "${KS_USER}" "${HOME_DIR}/crowsnest/bin/camera-streamer"
 
-# Try to provide camera-streamer (prebuilt) when desired
+# Try to install prebuilt camera-streamer (as user with sudo), if desired
 if [ "${want_cs}" -eq 1 ]; then
   as_user "${KS_USER}" '
     set -eux
@@ -88,51 +90,49 @@ if [ "${want_cs}" -eq 1 ]; then
       . /etc/os-release 2>/dev/null || true
       printf "%s" "${VERSION_CODENAME:-bookworm}"
     )"
-    # flavour used by upstream release naming
+    # Choose flavour name used by upstream assets
     if [ -e /etc/default/raspberrypi-kernel ] || echo "'"${MODEL}"'" | grep -qi "Raspberry Pi"; then
       flavour="raspi"
     else
       flavour="generic"
     fi
     ver="'"${CAMERA_STREAMER_VERSION}"'"
-    url_base="https://github.com/ayufan/camera-streamer/releases/download/v${ver}"
+    base="https://github.com/ayufan/camera-streamer/releases/download/v${ver}"
     pkg="camera-streamer-${flavour}_${ver}.${codename}_${arch}.deb"
     tmp="/tmp/${pkg}"
     ok=0
-    # Try flavour package; then generic fallback
-    if curl -fsSL -o "$tmp" "${url_base}/${pkg}"; then
+    sudo -En apt-get update
+    sudo -En apt-get install -y curl ca-certificates
+    if curl -fsSL -o "$tmp" "${base}/${pkg}"; then
       ok=1
     else
       pkg="camera-streamer-generic_${ver}.${codename}_${arch}.deb"
       tmp="/tmp/${pkg}"
-      curl -fsSL -o "$tmp" "${url_base}/${pkg}" && ok=1 || true
+      curl -fsSL -o "$tmp" "${base}/${pkg}" && ok=1 || true
     fi
     if [ "$ok" -eq 1 ]; then
-      sudo -En apt-get update
       sudo -En apt-get install -y "$tmp"
       ln -sf "$(command -v camera-streamer)" "$HOME/crowsnest/bin/camera-streamer/camera-streamer"
     else
-      echo "[crowsnest] WARN: No prebuilt camera-streamer found; will stub." >&2
+      echo "[crowsnest] WARN: no prebuilt camera-streamer found; will stub." >&2
     fi
   '
 fi
 
-# If we still don't have a camera-streamer binary in place, stub it (so Makefile doesn't abort)
-as_user "${KS_USER}" '
-  if [ ! -x "$HOME/crowsnest/bin/camera-streamer/camera-streamer" ]; then
-    cat >"$HOME/crowsnest/bin/camera-streamer/camera-streamer" <<'"'EOF'"
-#!/usr/bin/env bash
-echo "camera-streamer not installed on this device; using ustreamer-only." >&2
-exit 0
-'"'EOF'"
-    chmod +x "$HOME/crowsnest/bin/camera-streamer/camera-streamer"
-  fi
-'
+# If still missing, write a small stub (NO heredoc inside runuser)
+stub="${HOME_DIR}/crowsnest/bin/camera-streamer/camera-streamer"
+if [ ! -x "${stub}" ]; then
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'echo "camera-streamer not installed on this device; using ustreamer-only." >&2' \
+    'exit 0' \
+  | wr_pi 0755 "${stub}"
+fi
 
 section "Build/install Crowsnest (sudo inside, non-interactive)"
 as_user "${KS_USER}" 'cd "$HOME/crowsnest" && sudo -En make install'
 
-# Enable at boot via symlink (safe in chroot)
+# Enable at boot by symlink (safe in chroot)
 if [ -f /etc/systemd/system/crowsnest.service ]; then
   install -d -m0755 /etc/systemd/system/multi-user.target.wants
   ln -sf ../crowsnest.service /etc/systemd/system/multi-user.target.wants/crowsnest.service
@@ -141,7 +141,7 @@ command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
 
 section "Cleanup"
 remove_systemctl_shim
-# keep NOPASSWD:ALL until all installers finish; remove later (e.g., 100-harden.sh)
+# Keep NOPASSWD:ALL until all installers finish; remove in your finalizer (e.g., 100-harden.sh)
 apt_clean_all
 
-echo "[crowsnest] install complete (ustreamer ready; camera-streamer: ${want_cs})"
+echo "[crowsnest] install complete (ustreamer ready; camera-streamer policy: ${CN_INSTALL_CAMERA_STREAMER})"
