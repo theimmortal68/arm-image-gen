@@ -1,22 +1,26 @@
-name: Build and Customize (Klipper Suite)
+name: Build and Customize
 
 on:
-  push:
-    inputs:
-      devices: "rpi64"
+  push:                    # run after every commit/push
+    branches:
+      - '**'
   workflow_dispatch:
     inputs:
-      devices:
-        description: "Comma-separated device list (e.g. rpi64,orangepi5max)"
+      device:
+        description: "Single device (e.g. rpi64, opi5). Leave blank to use default."
         required: false
-        default: "rpi64"
+        default: ""
+      devices:
+        description: "CSV list of devices (e.g. rpi64,opi5). Overrides 'device' if set."
+        required: false
+        default: ""
 
 permissions:
-  actions: read
   contents: read
 
+# Global default when nothing is provided
 env:
-  DEVICE: ${{ (github.event_name == 'workflow_dispatch' && inputs.device) || 'rpi64' }}
+  DEVICE: rpi64
 
 concurrency:
   group: build-and-customize-${{ github.ref }}
@@ -30,10 +34,14 @@ jobs:
       devices: ${{ steps.mk.outputs.devices }}
     steps:
       - id: mk
+        name: Make device matrix
         shell: bash
+        env:
+          # Priority: CSV input > single device input > env.DEVICE > 'rpi64'
+          CSV: ${{ github.event.inputs.devices || github.event.inputs.device || env.DEVICE || 'rpi64' }}
         run: |
           set -euo pipefail
-          CSV="${{ github.event.inputs.devices }}"
+          CSV="${CSV:-rpi64}"
           # Split on comma, trim whitespace, drop empties, emit JSON array
           json="[$(
             printf '%s' "$CSV" \
@@ -42,6 +50,7 @@ jobs:
             | awk 'length>0{printf "\"%s\",",$0}' \
             | sed 's/,$//'
           )]"
+          [ "$json" = "[]" ] && json='["rpi64"]'
           echo "devices=$json" >> "$GITHUB_OUTPUT"
           echo "Using matrix: $json"
 
@@ -54,7 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        device: ${{ fromJSON(needs.prepare-matrix.outputs.devices) }}
+        device: ${{ fromJson(needs.prepare-matrix.outputs.devices || '["rpi64"]') }}
     env:
       DEVICE: ${{ matrix.device }}
       # Optional pins; adjust if you want different versions
@@ -66,27 +75,36 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Apt prep
+      # Optional: free disk space if your image build is large (uncomment if needed)
+      # - name: Free some disk space
+      #   run: |
+      #     sudo rm -rf /usr/local/lib/android || true
+      #     sudo rm -rf /opt/ghc || true
+      #     sudo rm -rf /usr/share/dotnet || true
+      #     df -h
+
+      - name: Apt prep (update & base tools)
         run: |
-          set -eux
+          set -eux pipefail
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             qemu-user-static binfmt-support qemu-utils kpartx dosfstools \
             parted e2fsprogs rsync xz-utils ca-certificates curl git \
             arch-test pandoc jq unzip util-linux udev mount kmod file \
-            perl python3-pip debian-archive-keyring gnupg
+            perl python3-pip debian-archive-keyring gnupg  pigz \
+            p7zip-full parted bmap-tools debootstrap
 
-      - name: Enable binfmts (arm/arm64)
-        run: |
-          set -eux
-          sudo update-binfmts --enable qemu-aarch64 || true
-          sudo update-binfmts --enable qemu-arm || true
-          arch-test arm64
-          qemu-aarch64-static --version
+#      - name: Enable binfmts (arm/arm64)
+#        run: |
+#          set -eux pipefail
+#          sudo update-binfmts --enable qemu-aarch64 || true
+#          sudo update-binfmts --enable qemu-arm || true
+#          arch-test arm64
+#          qemu-aarch64-static --version
 
       - name: Install mmdebstrap (pinned)
         run: |
-          set -eux
+          set -eux pipefail
           rm -rf mmdebstrap-src
           git clone --depth=1 --branch "${MM_TAG}" \
             https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src || {
@@ -98,34 +116,48 @@ jobs:
 
       - name: Install bdebstrap (runner local user)
         run: |
-          set -eux
+          set -eux pipefail
           python3 -m pip install --user --upgrade pip wheel
           python3 -m pip install --user "git+https://github.com/bdrung/bdebstrap@${BDEB_REF}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+     # (Optional) QEMU/Buildx if you containerize parts of the build
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm,arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Show selected device
+        run: echo "DEVICE=${DEVICE}"
+
       - name: Build rootfs with bdebstrap
+        env:
+          DEVICE: ${{ env.DEVICE }}
         run: |
-          set -eux
+          set -eux pipefail
           bash scripts/build-bdebstrap.sh "${DEVICE}" "devices/${DEVICE}/layers.yaml" "out/${DEVICE}-bookworm-arm64"
 
       - name: Make bootable image (Raspberry Pi)
         if: startsWith(matrix.device, 'rpi')
         run: |
-          set -eux
+          set -eux pipefail
           sudo bash scripts/make-img-rpi.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
           ls -lh build
 
       - name: Make bootable image (Armbian devices)
         if: startsWith(matrix.device, 'orange')
         run: |
-          set -eux
+          set -eux pipefail
           # Implement this script for your Armbian targets when ready:
           # it should create build/input-${DEVICE}.img from the rootfs.
           sudo bash scripts/make-img-armbian.sh "out/${DEVICE}-bookworm-arm64/rootfs" "build/input-${DEVICE}.img"
 
       - name: Package base artifact (ZIP)
         run: |
-          set -eux
+          set -eux pipefail
           mkdir -p artifacts
           zip -r "artifacts/base-input-${DEVICE}.zip" "build/input-${DEVICE}.img"
 
@@ -158,7 +190,7 @@ jobs:
       - name: Ensure custom.d present & executable
         shell: bash
         run: |
-          set -eux
+          set -eux pipefail
           test -d custopizer/custom.d
           chmod -R a+rx custopizer/custom.d
 
@@ -172,7 +204,7 @@ jobs:
       - name: Extract artifact safely (handles >2GiB)
         shell: bash
         run: |
-          set -eux
+          set -eux pipefail
           ls -l build || true
           ZIP="$(find build -maxdepth 1 -type f -name '*.zip' | head -n1 || true)"
           if [ -z "${ZIP}" ]; then
@@ -191,7 +223,7 @@ jobs:
       - name: Normalize image path (supports .img and .img.xz)
         shell: bash
         run: |
-          set -eux
+          set -eux pipefail
           SRC="$(find build -maxdepth 4 -type f \( -name "input-${DEVICE}.img" -o -name "input-${DEVICE}.img.xz" -o -name "input-*.img" -o -name "input-*.img.xz" \) | head -n1 || true)"
           [ -n "${SRC}" ] || { echo "No input image found after extraction"; exit 1; }
 
@@ -280,7 +312,7 @@ jobs:
       - name: Generate CustoPiZer config.local
         shell: bash
         run: |
-          set -eux
+          set -eux pipefail
           case "${DEVICE}" in
             rpi*|raspberrypi*) DISTRO="raspbian" ;;
             *)                 DISTRO="armbian"  ;;
@@ -297,13 +329,13 @@ jobs:
 
       - name: Pull CustoPiZer image
         run: |
-          set -eux
+          set -eux pipefail
           docker pull ghcr.io/octoprint/custopizer:latest
 
       - name: Run CustoPiZer (bind custom.d, explicit DNS)
         shell: bash
         run: |
-          set -eux
+          set -eux pipefail
           docker run --rm --privileged \
             --dns 8.8.8.8 --dns 1.1.1.1 \
             -v "${GITHUB_WORKSPACE}/build:/CustoPiZer/workspace" \
@@ -318,7 +350,7 @@ jobs:
       - name: Take ownership of output (post-CustoPiZer)
         shell: bash
         run: |
-          set -eux
+          set -eux pipefail
           sudo chown -R "$USER":"$USER" build
           chmod -R u+rwX build
 
