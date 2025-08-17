@@ -1,6 +1,7 @@
 name: Build and Customize (Klipper Suite)
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       devices:
