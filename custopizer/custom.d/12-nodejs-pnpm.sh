@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 export LC_ALL=C
+export DEBIAN_FRONTEND=noninteractive
 
 source /common.sh; install_cleanup_trap
+[ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh
 
-# Node.js + pnpm (early install)
-# - Default to Node.js 22.x (override with NODE_MAJOR)
-# - Install pnpm globally via npm (override PNPM_VERSION, default "latest")
+section "Install Node.js + pnpm"
 : "${NODE_MAJOR:=22}"
 : "${PNPM_VERSION:=latest}"
 
-export DEBIAN_FRONTEND=noninteractive
-
 # Minimal prerequisites
-apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl gnupg
+apt_install ca-certificates curl gnupg
 
 # Add NodeSource APT repo (key in keyring; Signed-By on the source)
 install -d -m 0755 /usr/share/keyrings /etc/apt/sources.list.d
@@ -25,11 +22,8 @@ cat >/etc/apt/sources.list.d/nodesource.list <<EOF
 deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main
 EOF
 
-apt-get update
-apt-get install -y --no-install-recommends nodejs
-
-# (Optional) toolchain for native addons; uncomment if your node deps need it
-# apt-get install -y --no-install-recommends build-essential python3 make g++
+apt_update_once
+apt_install nodejs
 
 # Install pnpm globally
 npm --version >/dev/null
@@ -44,3 +38,4 @@ install -d -m 0755 /etc
 } >> /etc/ks-manifest.txt
 
 echo_green "[nodejs] $(node -v)  [npm] $(npm -v)  [pnpm] $(pnpm -v)"
+apt_clean_all
