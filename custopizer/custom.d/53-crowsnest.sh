@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 53-crowsnest.sh — Install Crowsnest for Pi 4 / Pi 5 / Orange Pi 5 Max (chroot-safe)
+# 53-crowsnest.sh — Install Crowsnest for Pi 4 / Pi 5 / Orange Pi 5 Max (chroot-safe + robust fallback)
 set -euxo pipefail
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
@@ -147,10 +147,84 @@ for mf in "Makefile" "makefile" "GNUmakefile"; do
   fi
 done
 
-section "Build/install Crowsnest (sudo inside, non-interactive)"
+section "Build/install Crowsnest (sudo inside, non-interactive, verbose)"
 # Extra visibility: list the camera-streamer dir before building
 ls -lah "${cs_dir}" || true
-as_user "${KS_USER}" 'cd "$HOME/crowsnest" && sudo -En make install'
+
+# Capture make output for debugging and try to complete even if a sub-target fails.
+as_user "${KS_USER}" '
+  set -eux
+  cd "$HOME/crowsnest"
+  export V=1
+  export MAKEFLAGS="--output-sync=line -j$(nproc)"
+  # Capture full log
+  sudo -En bash -lc '\''( make install ) 2>&1 | tee /tmp/crowsnest-make-install.log'\'' || INSTALL_FAIL=1
+  # Share log path with root for later collection
+  if [ -f /tmp/crowsnest-make-install.log ]; then
+    sudo cp -f /tmp/crowsnest-make-install.log /tmp/crowsnest-make-install.log.root || true
+  fi
+  exit ${INSTALL_FAIL:-0}
+'
+
+# If make install failed, attempt a fallback manual install so the image remains functional
+if [ "${PIPESTATUS[0]:-0}" -ne 0 ] 2>/dev/null || [ ! -f /etc/systemd/system/crowsnest.service ]; then
+  section "Fallback: manual Crowsnest install (service + binaries)"
+  # Install main launcher if present
+  if [ -x "${HOME_DIR}/crowsnest/crowsnest" ]; then
+    install -D -m0755 "${HOME_DIR}/crowsnest/crowsnest" /usr/local/bin/crowsnest
+  elif [ -x "${HOME_DIR}/crowsnest/scripts/crowsnest.sh" ]; then
+    install -D -m0755 "${HOME_DIR}/crowsnest/scripts/crowsnest.sh" /usr/local/bin/crowsnest
+  else
+    # Last resort: provide a tiny wrapper that calls repo script if it appears later
+    cat <<'EOF' >/usr/local/bin/crowsnest
+#!/usr/bin/env bash
+if [ -x "$HOME/crowsnest/crowsnest" ]; then exec "$HOME/crowsnest/crowsnest" "$@"; fi
+if [ -x "$HOME/crowsnest/scripts/crowsnest.sh" ]; then exec "$HOME/crowsnest/scripts/crowsnest.sh" "$@"; fi
+echo "crowsnest entrypoint not found under $HOME/crowsnest" >&2
+exit 1
+EOF
+    chmod 0755 /usr/local/bin/crowsnest
+  fi
+
+  # Ensure a minimal config exists
+  install -d -o "${KS_USER}" -g "${KS_USER}" "${HOME_DIR}/printer_data/config"
+  cfg="${HOME_DIR}/printer_data/config/crowsnest.conf"
+  if [ ! -s "${cfg}" ]; then
+    cat <<'EOF' | wr_pi 0644 "${cfg}"
+# Minimal Crowsnest config (ustreamer-only fallback)
+[general]
+log_path: ~/printer_data/logs
+[cam usb0]
+enabled: true
+device: /dev/video0
+mode: mjpg
+port: 8080
+EOF
+  fi
+
+  # Create a simple service if missing
+  if [ ! -f /etc/systemd/system/crowsnest.service ]; then
+    cat >/etc/systemd/system/crowsnest.service <<EOF
+[Unit]
+Description=Crowsnest camera manager
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=${KS_USER}
+Group=${KS_USER}
+WorkingDirectory=${HOME_DIR}
+Environment=CN_CONFIG=${cfg}
+ExecStart=/usr/local/bin/crowsnest -c ${cfg}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  fi
+fi
 
 # Enable at boot by symlink (safe in chroot)
 if [ -f /etc/systemd/system/crowsnest.service ]; then
