@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 export LC_ALL=C
+export DEBIAN_FRONTEND=noninteractive
 
 source /common.sh; install_cleanup_trap
+[ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh
+
+section "Install Mainsail UI + nginx reverse proxy"
 
 # Target user/home
-[ -f /etc/ks-user.conf ] && . /etc/ks-user.conf
+[ -f /etc/ks-user.conf ] && . /etc/ks-user.conf || true
 : "${KS_USER:=pi}"
 : "${HOME_DIR:=/home/${KS_USER}}"
 
-export DEBIAN_FRONTEND=noninteractive
+# Packages
+apt_install nginx git unzip wget ca-certificates
 
-apt-get update
-apt-get install -y --no-install-recommends \
-  nginx git unzip wget ca-certificates
-
+# nginx layout
 install -d -m 0755 /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled
 
+# upstreams
 cat >/etc/nginx/conf.d/upstreams.conf <<'EOF'
 upstream apiserver { ip_hash; server 127.0.0.1:7125; }
 upstream mjpgstreamer1 { ip_hash; server 127.0.0.1:8080; }
@@ -25,10 +28,12 @@ upstream mjpgstreamer3 { ip_hash; server 127.0.0.1:8082; }
 upstream mjpgstreamer4 { ip_hash; server 127.0.0.1:8083; }
 EOF
 
+# variables
 cat >/etc/nginx/conf.d/common_vars.conf <<'EOF'
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
 EOF
 
+# site (needs $HOME_DIR expanded now)
 cat >/etc/nginx/sites-available/mainsail <<EOF
 server {
     listen 80 default_server;
@@ -74,24 +79,19 @@ EOF
 rm -f /etc/nginx/sites-enabled/default || true
 ln -sf /etc/nginx/sites-available/mainsail /etc/nginx/sites-enabled/mainsail
 
+# Install Mainsail web files
 install -d -o "${KS_USER}" -g "${KS_USER}" -m 0755 "${HOME_DIR}"
 if [ -e "${HOME_DIR}/mainsail" ]; then
   echo "Directory ${HOME_DIR}/mainsail already exists" >&2
   exit 1
 fi
-runuser -u "${KS_USER}" -- mkdir -p "${HOME_DIR}/mainsail"
-runuser -u "${KS_USER}" -- bash -lc '
-  set -euo pipefail
-  cd "$HOME/mainsail"
-  wget -q -O mainsail.zip "https://github.com/mainsail-crew/mainsail/releases/latest/download/mainsail.zip"
-  unzip mainsail.zip
-  rm -f mainsail.zip
-'
+as_user "${KS_USER}" 'mkdir -p "$HOME/mainsail" && cd "$HOME/mainsail" && wget -q -O mainsail.zip "https://github.com/mainsail-crew/mainsail/releases/latest/download/mainsail.zip" && unzip mainsail.zip && rm -f mainsail.zip'
 
+# Permissions
 gpasswd -a www-data "${KS_USER}" || true
 chmod g+x "${HOME_DIR}" || true
 
-# Write Update Manager fragment
+# Update Manager fragment via safe writer
 UMDIR="${HOME_DIR}/printer_data/config/update-manager.d"
 install -d -o "${KS_USER}" -g "${KS_USER}" -m 0755 "${UMDIR}"
 cat > "${UMDIR}/mainsail.conf" <<EOF
@@ -105,3 +105,4 @@ chown "${KS_USER}:${KS_USER}" "${UMDIR}/mainsail.conf"
 chmod 0644 "${UMDIR}/mainsail.conf"
 
 echo_green "[mainsail] nginx ready; httpdocs installed; UM fragment written"
+apt_clean_all
