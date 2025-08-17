@@ -60,9 +60,19 @@ EOF
 fi
 
 # --- Printer data layout (idempotent) ---
+# Ensure the parent exists and is owned by the user (prevents Moonraker EPERM)
+install -d -o "$KS_USER" -g "$KS_USER" "$HOME_DIR/printer_data"
+
+# Common subdirs
 install -d -o "$KS_USER" -g "$KS_USER" "$HOME_DIR/printer_data/config"
 install -d -o "$KS_USER" -g "$KS_USER" "$HOME_DIR/printer_data/logs"
 install -d -o "$KS_USER" -g "$KS_USER" "$HOME_DIR/printer_data/gcodes"
+
+# Include directory used by our update-manager drop-ins (timelapse, sonar, …)
+install -d -o "$KS_USER" -g "$KS_USER" "$HOME_DIR/printer_data/config/update-manager.d"
+
+# Heal any earlier root-owned bits under printer_data (safe if already correct)
+chown -R "$KS_USER:$KS_USER" "$HOME_DIR/printer_data"
 
 # --- Persist for later scripts ---
 cat >/etc/ks-user.conf <<EOF
