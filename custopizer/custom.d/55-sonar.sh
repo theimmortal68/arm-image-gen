@@ -1,159 +1,118 @@
 #!/usr/bin/env bash
-# 54-sonar.sh — Manual, noninteractive Sonar install for CI/chroot
-# - Clones mainsail-crew/sonar
-# - Ensures ~/printer_data/config/sonar.conf exists (minimal defaults)
-# - Installs a launcher at /usr/local/bin/sonar
-# - Creates/“enables” a systemd service in a chroot-safe way
-# - Adds a Moonraker Update Manager include (update-manager.d/sonar.conf)
-# - Uses ks_helpers if present; otherwise ships safe fallbacks
+# 54-sonar.sh — Install Sonar (WiFi keepalive) via unattended Makefile flow à la MainsailOS
+# - Mirrors MainsailOS flow: create ./tools/.config, then `make install`
+# - Non-interactive, chroot-safe; relies on /common.sh helpers (install_cleanup_trap, systemctl_if_exists)
+# - Ensures ~/printer_data exists and is user-owned to avoid permission issues seen earlier
 
 set -euxo pipefail
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
 
-# Core helpers (CustoPiZer)
+########################################
+# Functions and Base Configuration     #
+########################################
+
+# CustoPiZer common helpers
 source /common.sh
 install_cleanup_trap
 
-# Optional repo-specific helpers
+# Repo-specific helpers (optional)
 [ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh || true
 
-# ---------- Fallback helpers if ks_helpers.sh isn't present ----------
-section() { echo; echo "=== $* ==="; } || true
-apt_update_once() { apt-get update; }
-apt_install() { apt_update_once; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"; }
-apt_clean_all() { rm -rf /var/lib/apt/lists/*; }
-fix_sudoers_sane() {
-  install -d -m0750 -o root -g root /etc/sudoers.d
-  chown root:root /etc/sudoers.d
-  find /etc/sudoers.d -type f -exec chown root:root {} \; -exec chmod 0440 {} \; || true
-}
-ensure_sudo_nopasswd_all() {
-  fix_sudoers_sane
-  # Allow passwordless sudo during image build; remove in a final hardening step if desired
-  install -D -m0440 /dev/stdin /etc/sudoers.d/999-custopizer-pi-all <<<'pi ALL=(ALL) NOPASSWD:ALL'
-}
-create_systemctl_shim() {
-  install -D -m0755 /dev/stdin /usr/local/sbin/systemctl <<'EOF'
-#!/usr/bin/env bash
-# Chroot-safe systemctl shim: succeed for common subcommands when not PID 1=systemd
-if [ -x /bin/systemctl ] && [ -r /proc/1/comm ] && grep -qx 'systemd' /proc/1/comm 2>/dev/null; then
-  exec /bin/systemctl "$@"
+# Pull BASE_USER from /files/00-config if available (MainsailOS style).
+# Fallback to previously detected KS_USER or 'pi'.
+if [ -r /files/00-config ]; then
+  # shellcheck disable=SC1091
+  source /files/00-config
 fi
-case "$1" in
-  enable|disable|daemon-reload|is-enabled|start|stop|restart|reload|status) exit 0 ;;
-  *) exit 0 ;;
-esac
-EOF
-}
-remove_systemctl_shim() { rm -f /usr/local/sbin/systemctl; }
-wr_pi() {  # wr_pi MODE DEST  (reads stdin; chowns to KS_USER)
-  local mode="$1" dst="$2"
-  install -D -m "$mode" /dev/stdin "$dst"
-  chown "${KS_USER:-pi}:${KS_USER:-pi}" "$dst" || true
-}
-as_user() { local u="$1"; shift; runuser -u "$u" -- bash -lc "set -euxo pipefail; [ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh || true; $*"; }
-# --------------------------------------------------------------------
-
-# Resolve target user/home (from earlier 02-user or defaults)
-[ -f /etc/ks-user.conf ] && . /etc/ks-user.conf || true
 : "${KS_USER:=pi}"
-: "${HOME_DIR:=/home/${KS_USER}}"
+: "${BASE_USER:=${KS_USER}}"
+: "${HOME_DIR:=/home/${BASE_USER}}"
 
-section "Install prerequisites"
-# python3 for sonar.py, iputils-ping for ping, git to clone
-apt_install sudo git python3 iputils-ping curl ca-certificates
+########################################
+# Tunables                             #
+########################################
 
-section "Prepare sudo & chroot-safe systemctl"
-ensure_sudo_nopasswd_all
-create_systemctl_shim
+readonly REPO="https://github.com/mainsail-crew/sonar.git"
+readonly BRANCH="main"
+readonly DEPS=(git make)
 
-section "Clone/refresh Sonar repo"
-as_user "${KS_USER}" '
-  if [ ! -d "$HOME/sonar/.git" ]; then
-    git clone --depth=1 https://github.com/mainsail-crew/sonar.git "$HOME/sonar"
-  else
-    git -C "$HOME/sonar" fetch --depth=1 origin
-    git -C "$HOME/sonar" reset --hard origin/main || git -C "$HOME/sonar" reset --hard origin/master
-  fi
-'
+########################################
+# Prepare sudo (avoid password prompts)
+########################################
 
-section "Create minimal ~/printer_data/config/sonar.conf (if missing)"
-install -d -o "${KS_USER}" -g "${KS_USER}" "${HOME_DIR}/printer_data/config"
-SONAR_CFG="${HOME_DIR}/printer_data/config/sonar.conf"
-if [ ! -s "${SONAR_CFG}" ]; then
-  cat <<'EOF' | wr_pi 0644 "${SONAR_CFG}"
-[sonar]
-enable: true
-persistent_log: false
-target: auto
-count: 3
-interval: 60
-restart_threshold: 10
+# Some upstream installers call sudo internally; ensure noninteractive success in CI.
+if command -v install >/dev/null 2>&1; then
+  install -d -m0750 -o root -g root /etc/sudoers.d
+  # Fix ownership/mode in case earlier steps left it dirty
+  chown root:root /etc/sudoers.d || true
+  find /etc/sudoers.d -type f -exec chown root:root {} \; -exec chmod 0440 {} \; || true
+  # Allow passwordless sudo for BASE_USER during build (remove in final hardening if desired)
+  install -D -m0440 /dev/stdin /etc/sudoers.d/999-custopizer-${BASE_USER}-all <<EOF
+${BASE_USER} ALL=(ALL) NOPASSWD:ALL
 EOF
 fi
 
-section "Install launcher and service (manual, Makefile-free)"
-# Launcher that prefers repo wrapper if present; else python entrypoint
-cat >/usr/local/bin/sonar <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-HOME_DIR="${HOME_DIR:-$HOME}"
-if [ -x "${HOME_DIR}/sonar/sonar" ]; then
-  exec "${HOME_DIR}/sonar/sonar" "$@"
-elif [ -f "${HOME_DIR}/sonar/sonar.py" ]; then
-  exec /usr/bin/env python3 "${HOME_DIR}/sonar/sonar.py" "$@"
+########################################
+# Install System Packages              #
+########################################
+
+apt-get update
+apt-get install --yes --no-install-recommends "${DEPS[@]}"
+
+########################################
+# Ensure user data path                #
+########################################
+
+# Create ~/printer_data with proper ownership to avoid "Permission denied"
+install -d -o "${BASE_USER}" -g "${BASE_USER}" "${HOME_DIR}/printer_data"
+install -d -o "${BASE_USER}" -g "${BASE_USER}" "${HOME_DIR}/printer_data/config"
+install -d -o "${BASE_USER}" -g "${BASE_USER}" "${HOME_DIR}/printer_data/logs"
+
+########################################
+# Clone or refresh repository          #
+########################################
+
+if [ ! -d "${HOME_DIR}/sonar/.git" ]; then
+  pushd "${HOME_DIR}" >/dev/null
+  sudo -u "${BASE_USER}" git clone -b "${BRANCH}" --depth=1 "${REPO}" sonar
+  popd >/dev/null
 else
-  echo "Sonar not found in ${HOME_DIR}/sonar" >&2
-  exit 1
-fi
-EOF
-chmod 0755 /usr/local/bin/sonar
-
-# Service file (runs as KS_USER, points at launcher)
-cat >/etc/systemd/system/sonar.service <<EOF
-[Unit]
-Description=Sonar WiFi Keepalive
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-Type=simple
-User=${KS_USER}
-Group=${KS_USER}
-WorkingDirectory=${HOME_DIR}
-Environment=HOME_DIR=${HOME_DIR}
-ExecStart=/usr/local/bin/sonar
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# “Enable” in chroot by creating the wants/ symlink; reload if systemd is active
-install -d -m0755 /etc/systemd/system/multi-user.target.wants
-ln -sf ../sonar.service /etc/systemd/system/multi-user.target.wants/sonar.service
-command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
-
-section "Add Moonraker Update Manager include for Sonar"
-UM_DIR="${HOME_DIR}/printer_data/config/update-manager.d"
-install -d -o "${KS_USER}" -g "${KS_USER}" "${UM_DIR}"
-UM_SNIPPET="${UM_DIR}/sonar.conf"
-if [ ! -s "${UM_SNIPPET}" ]; then
-  cat <<'EOF' | wr_pi 0644 "${UM_SNIPPET}"
-[update_manager sonar]
-type: git_repo
-path: ~/sonar
-origin: https://github.com/mainsail-crew/sonar.git
-primary_branch: main
-managed_services: sonar
-install_script: tools/install.sh
-EOF
+  sudo -u "${BASE_USER}" git -C "${HOME_DIR}/sonar" fetch --depth=1 origin "${BRANCH}"
+  sudo -u "${BASE_USER}" git -C "${HOME_DIR}/sonar" reset --hard "origin/${BRANCH}"
 fi
 
-section "Cleanup"
-remove_systemctl_shim
-apt_clean_all
+########################################
+# Unattended config & install          #
+########################################
 
-echo "[sonar] manual install complete — config: ${SONAR_CFG} — service installed"
+pushd "${HOME_DIR}/sonar" >/dev/null
+
+# Prepare unattended config consumed by tools/install.sh via Makefile
+install -D -m0644 /dev/stdin "./tools/.config" <<EOF
+BASE_USER="${BASE_USER}"
+SONAR_DATA_PATH="${HOME_DIR}/printer_data"
+SONAR_ADD_SONAR_MOONRAKER="1"
+SONAR_UNATTENDED="1"
+EOF
+
+# TERM helps avoid any tput/ANSI issues in CI logs, though UNATTENDED should bypass TUI
+export TERM=xterm-256color
+
+# Run install as the user; installer will sudo when needed
+sudo -u "${BASE_USER}" make install
+
+# Clean up the temporary config file
+rm -f ./tools/.config
+
+popd >/dev/null
+
+########################################
+# Enable Service (chroot-safe)         #
+########################################
+
+# Use /common.sh helper that no-ops if systemd isn't PID 1
+systemctl_if_exists enable sonar.service || true
+systemctl_if_exists daemon-reload || true
+
+echo "[sonar] install complete — user=${BASE_USER} data_path=${HOME_DIR}/printer_data"
