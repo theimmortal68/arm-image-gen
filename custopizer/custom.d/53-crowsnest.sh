@@ -44,9 +44,9 @@ case "${MODEL}" in
 esac
 
 # Camera-streamer policy:
-#   auto: Pi 4/5/OPi5 try install prebuilt; falls back to stub on failure
-#   1   : force install attempt (falls back to stub if download fails)
-#   0   : skip install; stub (ustreamer-only)
+#   auto: try prebuilt; fall back to stub if not available
+#   1   : force install attempt (still falls back to stub if download fails)
+#   0   : skip install; force stub (ustreamer-only)
 : "${CN_INSTALL_CAMERA_STREAMER:=auto}"
 : "${CAMERA_STREAMER_VERSION:=0.2.8}"
 
@@ -56,7 +56,6 @@ if [ "${CN_INSTALL_CAMERA_STREAMER}" = "1" ]; then
 elif [ "${CN_INSTALL_CAMERA_STREAMER}" = "0" ]; then
   want_cs=0
 else
-  # auto
   want_cs=1
 fi
 
@@ -120,7 +119,8 @@ if [ "${want_cs}" -eq 1 ]; then
 fi
 
 # If still missing, write a small stub (NO heredoc inside runuser)
-stub="${HOME_DIR}/crowsnest/bin/camera-streamer/camera-streamer"
+cs_dir="${HOME_DIR}/crowsnest/bin/camera-streamer"
+stub="${cs_dir}/camera-streamer"
 if [ ! -x "${stub}" ]; then
   printf '%s\n' \
     '#!/usr/bin/env bash' \
@@ -129,7 +129,27 @@ if [ ! -x "${stub}" ]; then
   | wr_pi 0755 "${stub}"
 fi
 
+# Ensure a no-op Makefile so 'make -C bin/camera-streamer' or 'cd && make' both succeed
+noop_make='
+.PHONY: all apps install clean
+all:
+	@echo "camera-streamer: using prebuilt/stub binary; nothing to build."
+apps:
+	@true
+install:
+	@true
+clean:
+	@true
+'
+for mf in "Makefile" "makefile" "GNUmakefile"; do
+  if [ ! -f "${cs_dir}/${mf}" ]; then
+    printf "%s\n" "${noop_make}" | wr_pi 0644 "${cs_dir}/${mf}"
+  fi
+done
+
 section "Build/install Crowsnest (sudo inside, non-interactive)"
+# Extra visibility: list the camera-streamer dir before building
+ls -lah "${cs_dir}" || true
 as_user "${KS_USER}" 'cd "$HOME/crowsnest" && sudo -En make install'
 
 # Enable at boot by symlink (safe in chroot)
