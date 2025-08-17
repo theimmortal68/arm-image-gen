@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-set -euox pipefail
+# 99-enable-units.sh — enable a list of systemd units at boot (helper-ized)
+set -Eeuo pipefail
 export LC_ALL=C
-# shellcheck disable=SC1091
+
+# Bootstrap
 source /common.sh; install_cleanup_trap
+[ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh
+
+section "Enabling requested systemd units"
 
 FILES_LIST="/files/etc/ks-enable-units.txt"
 ETC_LIST="/etc/ks-enable-units.txt"
@@ -18,7 +23,7 @@ read_units() {
     trimmed="$(printf '%s' "${trimmed}" | xargs || true)"
     [ -n "${trimmed}" ] && UNITS+=("${trimmed}")
   done < "$src"
-  return 0   # <-- prevent set -e from killing the script on EOF
+  return 0   # prevent set -e from tripping at EOF
 }
 
 if [ -f "$ETC_LIST" ]; then
@@ -26,6 +31,7 @@ if [ -f "$ETC_LIST" ]; then
 elif [ -f "$FILES_LIST" ]; then
   read_units "$FILES_LIST"
 else
+  # Sensible defaults; customize via ks-enable-units.txt
   UNITS=(klipper.service moonraker.service crowsnest.service moonraker-timelapse.service sonar.service)
 fi
 
@@ -52,5 +58,9 @@ for u in "${UNITS[@]}"; do
   enable_one "$u"
 done
 
-systemctl_if_exists daemon-reload || true
+# Do not rely on a helper; handle chroot/non-systemd safely
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+fi
+
 echo "[enable] done"
