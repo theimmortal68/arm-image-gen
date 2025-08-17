@@ -15,9 +15,6 @@ create_systemctl_shim
 # Clone/update installer
 as_user "${KS_USER:-pi}" 'git_sync https://github.com/mainsail-crew/moonraker-timelapse.git "$HOME/moonraker-timelapse" main 1'
 
-# Run installer as user; decline any edits to moonraker.conf, reboots, etc.
-as_user "${KS_USER:-pi}" 'cd "$HOME/moonraker-timelapse" && printf "n\nn\nn\n" | make install'
-
 # Provide update-manager include (not editing moonraker.conf directly)
 um_write_repo timelapse "/home/${KS_USER:-pi}/moonraker-timelapse" "https://github.com/mainsail-crew/moonraker-timelapse.git" "main" "klipper"
 
