@@ -2,6 +2,8 @@ name: Build and Customize (Klipper Suite)
 
 on:
   push:
+    inputs:
+      devices: "rpi64"
   workflow_dispatch:
     inputs:
       devices:
