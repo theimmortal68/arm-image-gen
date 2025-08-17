@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 54-sonar.sh — Install Sonar (WiFi keepalive) chroot-safe & noninteractive
-# - Pre-creates ~/printer_data/config/sonar.conf (avoids interactive `make config`)
-# - Runs `sudo make install` as the target user
+# - Runs `make config` (TERM-safe) before `sudo make install`
+# - Pre-creates ~/printer_data/config/sonar.conf if missing (ok for idempotency)
 # - Adds Moonraker Update Manager include in update-manager.d
 # - Uses ks_helpers if available; otherwise provides minimal fallbacks
 
@@ -75,14 +75,15 @@ as_user "${KS_USER}" '
   fi
 '
 
-section "Ensure printer_data/config exists and create minimal sonar.conf"
+section "Ensure printer_data/config exists and (optionally) create sonar.conf"
 install -d -o "${KS_USER}" -g "${KS_USER}" "${HOME_DIR}/printer_data/config"
 
-# Pre-create config so `make install` is happy (noninteractive)
+# Sonar reads ~/printer_data/config/sonar.conf; it can run without one,
+# but their Makefile expects `make config` first. We still create a minimal file here
+# so `make config` has something to preserve. (See README for path.) 
+# Ref: https://github.com/mainsail-crew/sonar (README)
 SONAR_CFG="${HOME_DIR}/printer_data/config/sonar.conf"
 if [ ! -s "${SONAR_CFG}" ]; then
-  # Minimal but valid config (per README)
-  # https://github.com/mainsail-crew/sonar (Config: ~/printer_data/config/sonar.conf)
   cat <<'EOF' | wr_pi 0644 "${SONAR_CFG}"
 [sonar]
 enable: true
@@ -94,12 +95,13 @@ restart_threshold: 10
 EOF
 fi
 
-section "Run install (noninteractive, TERM-safe)"
+section "Run install (noninteractive: make config then sudo make install)"
 # Some Makefiles use tput/colors and expect TERM; set it to avoid errors
 as_user "${KS_USER}" '
   cd "$HOME/sonar"
   export TERM=xterm-256color
-  # With config already present, we can skip `make config`.
+  # Sonar expects `make config` (it prepares files checked by install)
+  make config
   sudo -En make install
 '
 
