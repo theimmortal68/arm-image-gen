@@ -1,78 +1,78 @@
 #!/usr/bin/env bash
-# 54-sonar.sh — Install Sonar (WiFi keepalive) via unattended Makefile flow à la MainsailOS
-# - Mirrors MainsailOS flow: create ./tools/.config, then `make install`
-# - Non-interactive, chroot-safe; relies on /common.sh helpers (install_cleanup_trap, systemctl_if_exists)
-# - Ensures ~/printer_data exists and is user-owned to avoid permission issues seen earlier
+# 54-sonar.sh — Install Sonar (WiFi keepalive) via unattended Makefile flow (no /files/00-config)
+# - Mirrors MainsailOS: create ./tools/.config → make install
+# - Detects target user from ks_helpers and/or /etc/ks-user.conf
+# - NO data-path creation here (02-user handles printer_data/*)
+# - Grants temporary sudo NOPASSWD for the build (remove later in hardening)
+# - Creates Moonraker Update Manager entry via um_write_repo (with fallback)
+# - Service enablement is deferred to 99-enable-units
 
 set -euxo pipefail
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
 
 ########################################
-# Functions and Base Configuration     #
+# Common helpers                       #
 ########################################
-
-# CustoPiZer common helpers
 source /common.sh
 install_cleanup_trap
-
-# Repo-specific helpers (optional)
+# Optional repo-specific helpers
 [ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh || true
 
-# Pull BASE_USER from /files/00-config if available (MainsailOS style).
-# Fallback to previously detected KS_USER or 'pi'.
-if [ -r /files/00-config ]; then
+########################################
+# Resolve target user/home             #
+########################################
+# Priority: /etc/ks-user.conf → ks_helpers (USER_NAME/USER_HOME) → defaults
+if [ -r /etc/ks-user.conf ]; then
   # shellcheck disable=SC1091
-  source /files/00-config
+  . /etc/ks-user.conf
 fi
-: "${KS_USER:=pi}"
-: "${BASE_USER:=${KS_USER}}"
-: "${HOME_DIR:=/home/${BASE_USER}}"
+
+if [ -z "${BASE_USER:-}" ]; then
+  if [ -n "${KS_USER:-}" ]; then
+    BASE_USER="${KS_USER}"
+  elif [ -n "${USER_NAME:-}" ]; then
+    BASE_USER="${USER_NAME}"
+  else
+    BASE_USER="pi"
+  fi
+fi
+
+if [ -z "${HOME_DIR:-}" ]; then
+  if [ -n "${USER_HOME:-}" ]; then
+    HOME_DIR="${USER_HOME}"
+  else
+    HOME_DIR="/home/${BASE_USER}"
+  fi
+fi
 
 ########################################
-# Tunables                             #
+# Config & deps                        #
 ########################################
-
 readonly REPO="https://github.com/mainsail-crew/sonar.git"
 readonly BRANCH="main"
+# MainsailOS installs git; we also ensure 'make' is present
 readonly DEPS=(git make)
 
 ########################################
-# Prepare sudo (avoid password prompts)
+# Prep sudo (avoid prompts in CI)      #
 ########################################
-
-# Some upstream installers call sudo internally; ensure noninteractive success in CI.
-if command -v install >/dev/null 2>&1; then
-  install -d -m0750 -o root -g root /etc/sudoers.d
-  # Fix ownership/mode in case earlier steps left it dirty
-  chown root:root /etc/sudoers.d || true
-  find /etc/sudoers.d -type f -exec chown root:root {} \; -exec chmod 0440 {} \; || true
-  # Allow passwordless sudo for BASE_USER during build (remove in final hardening if desired)
-  install -D -m0440 /dev/stdin /etc/sudoers.d/999-custopizer-${BASE_USER}-all <<EOF
+install -d -m0750 -o root -g root /etc/sudoers.d
+chown root:root /etc/sudoers.d
+find /etc/sudoers.d -type f -exec chown root:root {} \; -exec chmod 0440 {} \; || true
+install -D -m0440 /dev/stdin "/etc/sudoers.d/999-custopizer-${BASE_USER}-all" <<EOF
 ${BASE_USER} ALL=(ALL) NOPASSWD:ALL
 EOF
-fi
 
 ########################################
-# Install System Packages              #
+# APT deps                             #
 ########################################
-
 apt-get update
 apt-get install --yes --no-install-recommends "${DEPS[@]}"
 
 ########################################
-# Ensure user data path                #
+# Clone or refresh repo                #
 ########################################
-
-# Create ~/printer_data with proper ownership to avoid "Permission denied"
-install -d -o "${BASE_USER}" -g "${BASE_USER}" "${HOME_DIR}/printer_data"
-install -d -o "${BASE_USER}" -g "${BASE_USER}" "${HOME_DIR}/printer_data/config"
-install -d -o "${BASE_USER}" -g "${BASE_USER}" "${HOME_DIR}/printer_data/logs"
-
-########################################
-# Clone or refresh repository          #
-########################################
-
 if [ ! -d "${HOME_DIR}/sonar/.git" ]; then
   pushd "${HOME_DIR}" >/dev/null
   sudo -u "${BASE_USER}" git clone -b "${BRANCH}" --depth=1 "${REPO}" sonar
@@ -85,10 +85,9 @@ fi
 ########################################
 # Unattended config & install          #
 ########################################
-
 pushd "${HOME_DIR}/sonar" >/dev/null
 
-# Prepare unattended config consumed by tools/install.sh via Makefile
+# Write installer config to skip TUI, add UM integration, and set data path
 install -D -m0644 /dev/stdin "./tools/.config" <<EOF
 BASE_USER="${BASE_USER}"
 SONAR_DATA_PATH="${HOME_DIR}/printer_data"
@@ -96,23 +95,26 @@ SONAR_ADD_SONAR_MOONRAKER="1"
 SONAR_UNATTENDED="1"
 EOF
 
-# TERM helps avoid any tput/ANSI issues in CI logs, though UNATTENDED should bypass TUI
+# Avoid any tput/ANSI issues; UNATTENDED should bypass prompts anyway
 export TERM=xterm-256color
 
-# Run install as the user; installer will sudo when needed
-sudo -u "${BASE_USER}" make install
+# Run the upstream installer (as root; it will sudo internally for user-level ops)
+make install
 
-# Clean up the temporary config file
+# Clean up the temporary installer config
 rm -f ./tools/.config
 
 popd >/dev/null
 
 ########################################
-# Enable Service (chroot-safe)         #
+# Moonraker Update Manager include     #
 ########################################
+# um_write_repo <name> <path> <origin> <branch> [managed_services] [install_script]
+um_write_repo "sonar" "${HOME_DIR}/sonar" "https://github.com/mainsail-crew/sonar.git" "main" "sonar" "tools/install.sh"
 
-# Use /common.sh helper that no-ops if systemd isn't PID 1
-systemctl_if_exists enable sonar.service || true
-systemctl_if_exists daemon-reload || true
+########################################
+# NOTE: Service enabling is handled by
+# 99-enable-units, so we do nothing here
+########################################
 
 echo "[sonar] install complete — user=${BASE_USER} data_path=${HOME_DIR}/printer_data"
