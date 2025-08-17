@@ -6,7 +6,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 source /common.sh; install_cleanup_trap
 # Helpers: apt_install, as_user, wr_root, section, etc.
-[ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh
+[ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh || true
 
 section "RatOS integration (theme + configurator)"
 
@@ -79,8 +79,20 @@ timeout 180 bash -c 'while pid="$(cat "/home/'"${KS_USER}"'/.ratos-configurator.
   sleep 3
 done; exit 0' || true
 
+# --- Preflight: ensure Klippy venv is user-owned & on PATH so RatOS pip installs succeed
+VENV_DIR="${HOME_DIR}/klippy-env"
+if [ -d "${VENV_DIR}" ]; then
+  chown -R "${KS_USER}:${KS_USER}" "${VENV_DIR}"
+fi
+
 # --- Run RatOS printer configuration installer (user-level)
-as_user "${KS_USER}" 'bash "$HOME/printer_data/config/RatOS/scripts/ratos-install.sh" || true'
+# Ensure the venv's bin precedes system python/pip so the installer uses it.
+as_user "${KS_USER}" '
+  export PATH="$HOME/klippy-env/bin:$PATH"
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
+  export PIP_NO_CACHE_DIR=1
+  bash "$HOME/printer_data/config/RatOS/scripts/ratos-install.sh" || true
+'
 
 # --- Variant marker (informational)
 variant="debian"
