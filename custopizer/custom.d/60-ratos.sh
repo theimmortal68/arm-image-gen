@@ -66,7 +66,7 @@ as_user "${KS_USER}" 'bash "$HOME/ratos-configurator/app/scripts/setup.sh"'
 as_user "${KS_USER}" '
   if command -v npm >/dev/null 2>&1; then
     cd "$HOME/ratos-configurator/app"
-    ( npm run start >/dev/null 2>&1 & echo $! > "$HOME/.ratos-configurator.pid" ) || true
+    ( npm run start --silent >/dev/null 2>&1 & echo $! > "$HOME/.ratos-configurator.pid" ) || true
   else
     echo "[ratos] npm not found; skipping transient dev server start" >&2
   fi
