@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 export LC_ALL=C
+export DEBIAN_FRONTEND=noninteractive
 
 source /common.sh; install_cleanup_trap
+[ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh
 
-# Build dfu-util from git (GitLab preferred; fall back to SourceForge)
-# Upstream needs autotools when cloning from git: autoconf, automake (aclocal), libtool, pkg-config, compiler.
-# You also asked for pandoc and libusb-1.0-0-dev.
+section "Build and install dfu-util from git"
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends \
-  git ca-certificates curl \
+# Build prerequisites
+apt_install git ca-certificates curl \
   libusb-1.0-0-dev \
   autoconf automake libtool pkg-config build-essential \
   pandoc
@@ -19,24 +17,22 @@ apt-get install -y --no-install-recommends \
 install -d -m 0755 /usr/local/src
 cd /usr/local/src
 
-# Honor "no idempotence": fail if the dir already exists
+# No idempotence per your policy: fail if dir exists
 if [ -e dfu-util ]; then
   echo_red "[dfu-util] /usr/local/src/dfu-util already exists"; exit 1
 fi
 
-# Clone with fallbacks (network fallback only; still fails if dir exists)
+# Clone with fallbacks
 if git clone --depth=1 https://gitlab.com/dfu-util/dfu-util.git dfu-util; then
-  : # ok
+  :
 elif git clone --depth=1 git://git.code.sf.net/p/dfu-util/dfu-util dfu-util; then
-  : # ok
+  :
 else
   git clone --depth=1 https://git.code.sf.net/p/dfu-util/dfu-util dfu-util
 fi
 
 cd dfu-util
 
-# Autotools bootstrap + configure + build + install
-# (Using autogen.sh, which runs autoreconf -i under the hood.)
 ./autogen.sh
 ./configure --prefix=/usr/local
 make -j"$(nproc)"
@@ -49,3 +45,4 @@ if command -v dfu-util >/dev/null 2>&1; then
 fi
 
 echo_green "[dfu-util] built and installed from git"
+apt_clean_all
