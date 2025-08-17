@@ -123,10 +123,10 @@ wr_pi() {   # wr_pi <mode> </home/pi/...> ; read content from stdin
 # Moonraker update-manager.d drop-ins
 ########################################
 um_write_repo() {
-  # Usage: um_write_repo <name> <local_path> <origin_url> [branch=main] [managed_services]
   local name="$1" lpath="$2" origin="$3" branch="${4:-main}" services="${5:-}"
   local dir="$USER_HOME/printer_data/config/update-manager.d"
   install -d "$dir"
+  chown "$USER_NAME:$USER_NAME" "$dir"              # ★ ensure dir is owned by the user
   local um="$dir/$name.conf"
   cat >"$um" <<EOF
 [update_manager $name]
