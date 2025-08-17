@@ -42,9 +42,10 @@ EOF
 # Run-as-user wrapper
 ########################################
 as_user() {
-  # Usage: as_user <user> "<cmd ...>"
   local u="$1"; shift
-  runuser -u "$u" -- bash -lc "set -euxo pipefail; $*"
+  local cmd="$*"
+  runuser -u "$u" -- bash -lc \
+    "set -euxo pipefail; [ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh; $cmd"
 }
 
 ########################################
