@@ -15,7 +15,7 @@ mmdebstrap:
       # Install the official Raspberry Pi archive keyring via .deb (in target)
       # --------------------------------------------------------------------
       BASE="https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring"
-      # Find latest keyring .deb from directory listing, download into target, dpkg -i inside chroot
+      # Find latest keyring .deb from directory listing, download into target, then extract into rootfs
       DEB="$(curl -fsSL "${BASE}/" \
             | sed -n 's@.*href="\([^"]*raspberrypi-archive-keyring_[^"]*_all\.deb\)".*@\1@p' \
             | sort -V | tail -1)"
@@ -24,7 +24,7 @@ mmdebstrap:
         exit 1
       fi
       curl -fsSL -o "$1/tmp/${DEB##*/}" "${BASE}/${DEB##*/}"
-      chroot "$1" dpkg -i "/tmp/${DEB##*/}"
+      dpkg-deb -x "$1/tmp/${DEB##*/}" "$1"
       rm -f "$1/tmp/${DEB##*/}"
 
       # Raspberry Pi archive (Bookworm) — use HTTPS and Signed-By
