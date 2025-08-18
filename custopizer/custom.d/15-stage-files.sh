@@ -5,7 +5,7 @@ export LC_ALL=C
 source /common.sh; install_cleanup_trap
 [ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh
 
-section "Stage overlay from ./files into / (and process *.append)"
+section "Stage overlay from /files into / (and process *.append)"
 
 # Raspberry Pi APT pin (optional): prefer RPi camera stack when repo is configured
 if grep -Rqs 'archive\.raspberrypi\.org' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
@@ -19,8 +19,8 @@ EOF
   echo_green "[15-stage-files] Installed Raspberry Pi APT pin (camera stack preference)"
 fi
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-FILES_DIR="${SCRIPT_DIR}/files"
+# Use /files as the canonical overlay root (so staged assets live under custopizer/files/*)
+FILES_DIR="/files"
 
 if [ -d "${FILES_DIR}" ]; then
   echo_green "[15-stage-files] Staging overlay from: ${FILES_DIR}"
@@ -31,10 +31,15 @@ if [ -d "${FILES_DIR}" ]; then
     apt_install rsync
   fi
 
-  # 1) Mirror everything EXCEPT *.append; keep repo file modes; force root ownership.
+  # 1) Mirror everything EXCEPT:
+  #    - any .git* metadata
+  #    - any *.append files (handled in step 2)
+  #    - top-level helper artifacts: ks_helpers.sh, systemctl
   rsync -aHAX --info=stats2 \
         --exclude='.git*' \
         --exclude='**/*.append' \
+        --exclude='ks_helpers.sh' \
+        --exclude='systemctl' \
         --chown=root:root \
         "${FILES_DIR}/" "/"
 
