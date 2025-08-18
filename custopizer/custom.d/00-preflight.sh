@@ -8,6 +8,9 @@ install_cleanup_trap
 
 echo "[preflight] start"
 
+# 1) Install systemctl shim immediately so package postinsts cannot start services.
+ks_systemctl_shim_install
+
 # ---- sudo sanity (self-heal, don't fail the build) -------------------------
 if [ -x /usr/bin/sudo ]; then
   st="$(stat -c '%u:%g %a' /usr/bin/sudo || true)"
