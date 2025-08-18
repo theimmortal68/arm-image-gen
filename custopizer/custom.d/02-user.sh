@@ -7,9 +7,6 @@ install_cleanup_trap
 # Use helpers if present (scoped sudo, run-as-user, writers, etc.)
 [ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh
 
-# --- Load persisted defaults (if set by a prior run) ---
-[ -f /etc/ks-user.conf ] && . /etc/ks-user.conf || true
-
 # --- Inputs / defaults ---
 KS_USER="${KS_USER:-pi}"
 KS_USER="${KS_USER,,}"  # normalize
@@ -46,14 +43,13 @@ fi
 
 # --- Scoped passwordless sudo (only if requested) ---
 if [ "$KS_SUDO_NOPASSWD" = "1" ]; then
-  # Helper grants NOPASSWD for apt/systemctl/journalctl; safer than ALL:ALL
   if command -v ensure_sudo_nopasswd >/dev/null 2>&1; then
     ensure_sudo_nopasswd
   else
     install -d -m 0750 /etc/sudoers.d
     f="/etc/sudoers.d/010-${KS_USER}-nopasswd"
     cat >"$f" <<EOF
-${KS_USER} ALL=(root) NOPASSWD:/usr/bin/apt,/usr/bin/apt-get,/usr/bin/systemctl,/usr/sbin/service,/usr/bin/journalctl
+${KS_USER} ALL=(ALL:ALL) NOPASSWD:ALL
 EOF
     chown 0:0 "$f"; chmod 0440 "$f"
   fi

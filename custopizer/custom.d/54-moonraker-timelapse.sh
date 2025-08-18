@@ -15,10 +15,6 @@ USER_NAME="${IGconf_device_user1:-pi}"
 USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6 || true)"
 [ -n "$USER_HOME" ] || USER_HOME="/home/${USER_NAME}"
 
-# Base deps (quiet, via helpers)
-apt_update_once || true
-apt_install sudo git ffmpeg build-essential ca-certificates
-
 # Clone/update repo as the device user
 git_sync "https://github.com/mainsail-crew/moonraker-timelapse.git" \
          "${USER_HOME}/moonraker-timelapse" \

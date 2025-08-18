@@ -8,8 +8,6 @@ install_cleanup_trap
 [ -r /files/ks_helpers.sh ] && source /files/ks_helpers.sh
 
 section "Install Klipper (KalicoCrew bleeding-edge-v2)"
-apt_install git curl ca-certificates gcc g++ make libffi-dev pkg-config \
-            libatlas3-base libatlas-base-dev libgfortran5 libjpeg-dev zlib1g-dev
 
 ensure_venv /home/pi/klippy-env
 
@@ -24,6 +22,3 @@ as_user "${KS_USER:-pi}" 'cd "$HOME/klipper" && "$HOME/klippy-env/bin/python" -m
 
 # Update manager entry for Klipper (so it shows in Software Updates)
 um_write_repo klipper "/home/pi/klipper" "https://github.com/KalicoCrew/kalico.git" "bleeding-edge-v2" "klipper"
-
-# Systemd service enablement will be handled post-boot by moonraker installer; no-op here.
-apt_clean_all

@@ -1,12 +1,13 @@
 ---
 mmdebstrap:
   # Install Raspberry Pi userland & camera utilities AFTER repo is added by firmware.yaml
-  customize-hooks:
-    - |
-      set -eu
-      chroot "$1" bash -euo pipefail <<'EOSH'
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update
-      # Core Pi tools and camera stack; some names differ on Bookworm
-      apt-get install -y raspberrypi-sys-mods raspi-config raspinfo         rpicam-apps libcamera0 libcamera-tools v4l-utils ffmpeg ustreamer || true
-      EOSH
+  packages:
+    - libraspberrypi0
+    - libraspberrypi-bin
+    - libcamera0
+    - libcamera-tool
+    - libcamera-dev
+    - rpicam-apps   # uncomment if you ship the newer camera apps
+    - raspinfo
+    - raspi-config
+    - raspberry-sys-mods

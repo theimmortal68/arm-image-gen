@@ -41,3 +41,59 @@ mmdebstrap:
       Acquire::https::Timeout "30";
       Acquire::Languages "none";
       EOF
+      cat > "$1/etc/apt/apt.conf.d/00recommends" <<'EOF'
+      APT::Install-Recommends "false";
+      APT::Install-Suggests "false";
+      EOF
+
+  packages:
+    - autoconf
+    - automake
+    - build-essential
+    - ca-certificates
+    - can-utils
+    - curl
+    - gcc
+    - g++
+    - git
+    - gnupg
+    - iproute2
+    - libatlas-base-dev
+    - libatlas3-base
+    - libffi-dev
+    - libgfortran5
+    - libjpeg-dev
+    - libssl-dev
+    - libtool
+    - libusb-1.0-0-dev
+    - make
+    - nginx
+    - packagekit
+    - pandoc
+    - pkg-config
+    - python3-dev
+    - python3-matplotlib
+    - python3-numpy
+    - python3-opencv
+    - python3-serial
+    - python3-venv
+    - python3-virtualenv
+    - rsync
+    - sudo
+    - unzip
+    - wget
+    - whiptail
+    - wireless-tools
+    - v4l-utils
+    - ffmpeg
+    - ustreamer
+  customize-hooks:
+    - |
+      set -eux
+      chroot "$1" bash -euo pipefail <<'EOSH'
+      set -eux
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+      apt-get -y --no-install-recommends install nodejs
+      EOSH

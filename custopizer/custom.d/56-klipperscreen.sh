@@ -13,18 +13,11 @@ section "Install KlipperScreen (X backend)"
 : "${KS_USER:=pi}"
 : "${HOME_DIR:=/home/${KS_USER}}"
 
-# Deps + sudo policy for installer
-apt_install git ca-certificates curl sudo
-ensure_sudo_nopasswd
-create_systemctl_shim
-
 # Clone/refresh as user
 as_user "${KS_USER}" 'git_sync https://github.com/KlipperScreen/KlipperScreen.git "$HOME/KlipperScreen" master 1'
 
 # Run upstream installer as user (non-interactive flags)
 as_user "${KS_USER}" 'cd "$HOME" && SERVICE=Y BACKEND=X NETWORK=N START=0 ./KlipperScreen/scripts/KlipperScreen-install.sh'
-
-remove_systemctl_shim
 
 # Update Manager include (write directly; needs extra keys)
 install -d -o "${KS_USER}" -g "${KS_USER}" -m 0755 "${HOME_DIR}/printer_data/config/update-manager.d"
@@ -41,6 +34,4 @@ EOF
 chown "${KS_USER}:${KS_USER}" "${HOME_DIR}/printer_data/config/update-manager.d/KlipperScreen.conf"
 chmod 0644 "${HOME_DIR}/printer_data/config/update-manager.d/KlipperScreen.conf"
 
-systemctl_if_exists daemon-reload || true
 echo_green "[KlipperScreen] installed; UM fragment written"
-apt_clean_all

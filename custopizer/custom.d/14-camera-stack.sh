@@ -20,47 +20,6 @@ elif grep -qiE "orangepi|orange pi" "$MODEL_FILE" 2>/dev/null || grep -qi "orang
   is_orangepi=true
 fi
 
-# Common tools
-apt_update_once || true
-apt_install v4l-utils ffmpeg ustreamer || true
-
-# RPi libcamera/libraspberrypi stack
-if $is_rpi; then
-  section "RPi: install libcamera + firmware userspace"
-  apt_install libraspberrypi0 libraspberrypi-bin libcamera0 libcamera-dev || true
-fi
-
-# Non-RPi (e.g., Orange Pi 5 Max): camera-streamer preferred
-have_cs=0
-if ! $is_rpi; then
-  section "Non-RPi: install camera-streamer (preferred)"
-  if DEBIAN_FRONTEND=noninteractive apt-get -y --no-install-recommends install camera-streamer; then
-    have_cs=1
-  else
-    section "Attempt prebuilt camera-streamer package"
-    : "${CAMERA_STREAMER_VERSION:=0.2.8}"
-    . /etc/os-release || true
-    CODENAME="${VERSION_CODENAME:-bookworm}"
-    ARCH="$(dpkg --print-architecture)"
-    BASE="https://github.com/ayufan/camera-streamer/releases/download/v${CAMERA_STREAMER_VERSION}"
-    # First try generic build
-    PKG="camera-streamer-generic_${CAMERA_STREAMER_VERSION}.${CODENAME}_${ARCH}.deb"
-    TMP="/tmp/${PKG}"
-    if curl -fsSL -o "$TMP" "${BASE}/${PKG}"; then
-      apt-get -y install "$TMP" && have_cs=1 || true
-    else
-      # Last resort: SoC-specific (best-effort)
-      for FLAV in rk3588 rk3399 generic; do
-        PKG="camera-streamer-${FLAV}_${CAMERA_STREAMER_VERSION}.${CODENAME}_${ARCH}.deb"
-        TMP="/tmp/${PKG}"
-        if curl -fsSL -o "$TMP" "${BASE}/${PKG}"; then
-          apt-get -y install "$TMP" && have_cs=1 && break || true
-        fi
-      done
-    fi
-  fi
-fi
-
 # Policy file consumed later by 99-enable-units.sh
 install -d -m 0755 /etc/crowsnest
 PREF="ustreamer"
@@ -80,5 +39,3 @@ prefer=${PREF}
 EOF
 
 echo "[camera] policy prefer=${PREF} (is_rpi=${is_rpi}, is_orangepi=${is_orangepi})"
-
-apt_clean_all || true

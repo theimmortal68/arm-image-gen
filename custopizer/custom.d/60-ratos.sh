@@ -20,8 +20,6 @@ HOME_DIR="$(getent passwd "$KS_USER" | cut -d: -f6 || true)"
 : "${RATOS_THEME_BRANCH:=v2.1.x}"
 : "${RATOS_CONFIGURATOR_REPO:=https://github.com/theimmortal68/RatOS-configurator.git}"
 : "${RATOS_CONFIGURATOR_BRANCH:=v2.1.x-backport}"
-# python3-serial (klipper req), python3-opencv (obico req)
-: "${RATOS_DEPS:=python3-serial python3-opencv}"
 
 # --- A) Clone theme and configurator (no idempotence checks by design) ---
 section "Clone RatOS theme and configurator"
@@ -56,13 +54,6 @@ fi
 if [ -f "/etc/orangepi-release" ]; then
   ln -sf "/etc/${DIST_NAME,,}-release" /etc/aaaa-release
 fi
-
-# --- D) System deps used by RatOS (kept here per reference workflow) ---
-section "Install RatOS system deps"
-apt-get update --allow-releaseinfo-change
-# Provided by /common.sh in upstream refs; no quotes on purpose to allow word-splitting
-# shellcheck disable=SC2086
-check_install_pkgs ${RATOS_DEPS}
 
 # --- E) Configurator setup, start, and wait for API (HTTP 404 = ready) ---
 section "Install RatOS Configurator (app/scripts/setup.sh)"

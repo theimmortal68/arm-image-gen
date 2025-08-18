@@ -13,9 +13,6 @@ section "Install Mainsail UI + nginx reverse proxy"
 : "${KS_USER:=pi}"
 : "${HOME_DIR:=/home/${KS_USER}}"
 
-# Packages
-apt_install nginx git unzip wget ca-certificates
-
 # nginx layout
 install -d -m 0755 /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled
 
@@ -105,4 +102,3 @@ chown "${KS_USER}:${KS_USER}" "${UMDIR}/mainsail.conf"
 chmod 0644 "${UMDIR}/mainsail.conf"
 
 echo_green "[mainsail] nginx ready; httpdocs installed; UM fragment written"
-apt_clean_all

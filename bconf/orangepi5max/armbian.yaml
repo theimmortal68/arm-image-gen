@@ -20,3 +20,21 @@ mmdebstrap:
       apt-get update
       apt-get install -y armbian-firmware || true
       EOSH
+
+      chroot "$1" bash -euo pipefail <<'EOSH'
+      set -eux
+      export DEBIAN_FRONTEND=noninteractive
+      CS_VER="${CAMERA_STREAMER_VERSION:-0.2.8}"
+      ARCH="$(dpkg --print-architecture)"
+      CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME}")"
+      BASE="https://github.com/ayufan/camera-streamer/releases/download/v${CS_VER}"
+      for PKG in \
+        "camera-streamer-generic_${CS_VER}.${CODENAME}_${ARCH}.deb" \
+        "camera-streamer-rk3588_${CS_VER}.${CODENAME}_${ARCH}.deb" \
+        "camera-streamer-rk3399_${CS_VER}.${CODENAME}_${ARCH}.deb"
+      do
+        if curl -fsSLo "/tmp/$PKG" "${BASE}/${PKG}"; then
+          apt-get -y install "/tmp/$PKG" && break
+        fi
+      done
+      EOSH

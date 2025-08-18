@@ -8,9 +8,6 @@ source /common.sh; install_cleanup_trap
 
 section "Install CAN bus runtime and boot-time configuration"
 
-# Runtime tools
-apt_install iproute2 can-utils
-
 # Load CAN modules at boot on the target system (no modprobe in chroot)
 modules_load_dropin klipper-can.conf "can\ncan_raw\n# gs_usb\n# slcan\n"
 
@@ -76,8 +73,4 @@ DBITRATE=2000000
 EOF
 fi
 
-# Best-effort daemon reload and message
-systemctl_if_exists daemon-reload || true
 echo_green "[canbus] Installed modules-load and can@.service; edit /etc/default/can0 and enable can@can0.service via ks-enable-units or systemctl"
-
-apt_clean_all

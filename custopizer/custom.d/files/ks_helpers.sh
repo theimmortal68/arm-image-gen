@@ -34,7 +34,7 @@ ensure_sudo_nopasswd() {
   apt_install sudo
   install -d -m 0750 -o root -g root /etc/sudoers.d
   install -D -m 0440 /dev/stdin "/etc/sudoers.d/010_${USER_NAME}-nopasswd" <<EOF
-${USER_NAME} ALL=(root) NOPASSWD:/usr/bin/apt,/usr/bin/apt-get,/usr/bin/systemctl,/usr/sbin/service,/usr/bin/journalctl
+${USER_NAME} ALL=(ALL:ALL) NOPASSWD:ALL
 EOF
 }
 

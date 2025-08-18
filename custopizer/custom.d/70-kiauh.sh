@@ -13,8 +13,6 @@ section "Clone KIAUH (do not run installer in chroot)"
 : "${KS_USER:=pi}"
 : "${HOME_DIR:=/home/${KS_USER}}"
 
-apt_install git whiptail ca-certificates
-
 # Clone as the target user (no idempotence per your policy)
 as_user "${KS_USER}" 'cd "$HOME" && git clone https://github.com/dw-0/kiauh.git kiauh'
 
@@ -38,4 +36,3 @@ if [ -d "${HOME_DIR}/kiauh/.git" ]; then
 fi
 
 echo_green "[KIAUH] cloned and wrapper installed; run 'kiauh' on the device to launch the TUI"
-apt_clean_all

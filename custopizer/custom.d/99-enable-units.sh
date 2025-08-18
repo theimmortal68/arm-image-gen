@@ -9,7 +9,10 @@ source /common.sh; install_cleanup_trap
 
 section "Enabling requested systemd units"
 
-# Remove systemctl shim FIRST so enables create real symlinks in the image.
+# Remove any policy-rc.d guard so services can start on target
+rm -f /usr/sbin/policy-rc.d || true
+
+# Remove systemctl shim FIRST so enables create real symlinks
 ks_systemctl_shim_remove
 
 FILES_LIST="/files/etc/ks-enable-units.txt"

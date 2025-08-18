@@ -8,12 +8,6 @@ source /common.sh; install_cleanup_trap
 
 section "Build and install dfu-util from git"
 
-# Build prerequisites
-apt_install git ca-certificates curl \
-  libusb-1.0-0-dev \
-  autoconf automake libtool pkg-config build-essential \
-  pandoc
-
 install -d -m 0755 /usr/local/src
 cd /usr/local/src
 
@@ -45,4 +39,3 @@ if command -v dfu-util >/dev/null 2>&1; then
 fi
 
 echo_green "[dfu-util] built and installed from git"
-apt_clean_all

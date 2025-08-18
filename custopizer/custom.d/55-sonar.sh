@@ -3,7 +3,6 @@
 # - Mirrors MainsailOS: create ./tools/.config → make install
 # - Detects target user from ks_helpers and/or /etc/ks-user.conf
 # - NO data-path creation here (02-user handles printer_data/*)
-# - Grants temporary sudo NOPASSWD for the build (remove later in hardening)
 # - Creates Moonraker Update Manager entry via um_write_repo (with fallback)
 # - Service enablement is deferred to 99-enable-units
 
@@ -53,22 +52,6 @@ readonly REPO="https://github.com/mainsail-crew/sonar.git"
 readonly BRANCH="main"
 # MainsailOS installs git; we also ensure 'make' is present
 readonly DEPS=(git make)
-
-########################################
-# Prep sudo (avoid prompts in CI)      #
-########################################
-install -d -m0750 -o root -g root /etc/sudoers.d
-chown root:root /etc/sudoers.d
-find /etc/sudoers.d -type f -exec chown root:root {} \; -exec chmod 0440 {} \; || true
-install -D -m0440 /dev/stdin "/etc/sudoers.d/999-custopizer-${BASE_USER}-all" <<EOF
-${BASE_USER} ALL=(ALL) NOPASSWD:ALL
-EOF
-
-########################################
-# APT deps                             #
-########################################
-apt-get update
-apt-get install --yes --no-install-recommends "${DEPS[@]}"
 
 ########################################
 # Clone or refresh repo                #

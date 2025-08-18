@@ -8,20 +8,7 @@ install_cleanup_trap
 
 export DEBIAN_FRONTEND=noninteractive
 
-section "Install Node.js 22.x via NodeSource setup script"
-
-# Clean up any previous manual NodeSource entries (from earlier attempts)
-rm -f /etc/apt/sources.list.d/nodesource.list /etc/apt/keyrings/nodesource.gpg || true
-
-apt_update_once || true
-apt_install ca-certificates curl gnupg
-
-# Official NodeSource installer auto-detects distro/codename and configures apt + keys
-# NOTE: we're root in chroot, so no sudo.
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-
-# Install Node.js (provides /usr/bin/node and /usr/bin/npm)
-apt-get -y --no-install-recommends install nodejs
+section "Install NPM and PNPM"
 
 # Quiet npm in CI logs (reduce harmless noise)
 npm config set fund false

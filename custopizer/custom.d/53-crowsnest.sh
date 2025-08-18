@@ -79,7 +79,4 @@ RestartSec=2
 WantedBy=multi-user.target
 EOF
 
-# No enablement here; 99-enable-units.sh will enable crowsnest + chosen backend.
-command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload || true
-
 section "Crowsnest install complete"

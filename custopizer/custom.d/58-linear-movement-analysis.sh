@@ -13,9 +13,6 @@ section "Install Linear Movement Analysis (KLMA)"
 : "${KS_USER:=pi}"
 : "${HOME_DIR:=/home/${KS_USER}}"
 
-# Basic deps
-apt_install git ca-certificates curl
-
 # Clone or refresh as target user
 as_user "${KS_USER}" 'git_sync https://github.com/worksasintended/klipper_linear_movement_analysis.git "$HOME/klipper_linear_movement_analysis" main 1'
 
@@ -41,6 +38,4 @@ EOF
 chown "${KS_USER}:${KS_USER}" "${HOME_DIR}/printer_data/config/update-manager.d/LinearMovementAnalysis.conf"
 chmod 0644 "${HOME_DIR}/printer_data/config/update-manager.d/LinearMovementAnalysis.conf"
 
-systemctl_if_exists daemon-reload || true
 echo_green "[KLMA] installed; UM fragment written"
-apt_clean_all

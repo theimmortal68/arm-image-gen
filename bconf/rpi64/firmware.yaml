@@ -14,7 +14,7 @@ mmdebstrap:
       chmod 0644 "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
 
       cat >"$1/etc/apt/sources.list.d/raspi.list" <<'EOF'
-      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] http://archive.raspberrypi.com/debian bookworm main
+      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] http://archive.raspberrypi.com/debian bookworm main contrib non-free rpi
       EOF
 
       # Pin Raspberry Pi kernel/bootloader/EEPROM HIGH so Debian can't override
@@ -31,6 +31,13 @@ mmdebstrap:
       Pin-Priority: -1
       EOF
 
+      # Pin RPi-origin libcamera stack to avoid libcamera-ipa/libcamera0 mismatches
+      cat >/etc/apt/preferences.d/99-raspi-camera.pref <<'EOF'
+      Package: libcamera* libcaml* libepoxy* libdrm* libv4l-0* libv4l2rds*
+      Pin: origin "archive.raspberrypi.org"
+      Pin-Priority: 1001
+      EOF
+  
       chroot "$1" bash -euo pipefail <<'EOSH'
       export DEBIAN_FRONTEND=noninteractive
       apt-get update
