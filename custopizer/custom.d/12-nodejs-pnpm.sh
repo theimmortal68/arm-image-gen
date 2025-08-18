@@ -8,46 +8,37 @@ install_cleanup_trap
 
 export DEBIAN_FRONTEND=noninteractive
 
-section "Install Node.js 22.x and pnpm (via Corepack)"
+section "Install Node.js 22.x via NodeSource setup script"
 
-# Detect distro codename for NodeSource (works for Debian/Raspberry Pi OS & Ubuntu/Armbian)
-. /etc/os-release
-CODENAME="${VERSION_CODENAME:-bookworm}"
+# Clean up any previous manual NodeSource entries (from earlier attempts)
+rm -f /etc/apt/sources.list.d/nodesource.list /etc/apt/keyrings/nodesource.gpg || true
 
-# Prereqs
-apt-get -o Acquire::Retries=3 update
-apt-get -y --no-install-recommends install ca-certificates curl gnupg
+apt_update_once || true
+apt_install ca-certificates curl gnupg
 
-# NodeSource repo/key (no nvm; ensures /usr/bin/node and /usr/bin/npm are present)
-install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-  | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+# Official NodeSource installer auto-detects distro/codename and configures apt + keys
+# NOTE: we're root in chroot, so no sudo.
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 
-echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x ${CODENAME} main" \
-  > /etc/apt/sources.list.d/nodesource.list
-
-apt-get -o Acquire::Retries=3 update
+# Install Node.js (provides /usr/bin/node and /usr/bin/npm)
 apt-get -y --no-install-recommends install nodejs
 
-# Quiet npm in CI logs (no audit/fund/notify; warn-level logs)
+# Quiet npm in CI logs (reduce harmless noise)
 npm config set fund false
 npm config set audit false
 npm config set update-notifier false
-npm config set loglevel warn
+npm config set loglevel warn || true
 
-# Enable Corepack and (optionally) pin pnpm.
-# If you want a specific pnpm, export PNPM_VERSION before running (e.g., PNPM_VERSION=9.12.3)
+# Enable Corepack so pnpm/yarn are managed deterministically
 corepack enable || true
+# Pin pnpm if you want: export PNPM_VERSION=9.12.3 before running this step
 if [ -n "${PNPM_VERSION:-}" ]; then
-  corepack prepare "pnpm@${PNPM_VERSION}" --activate
+  corepack prepare "pnpm@${PNPM_VERSION}" --activate || true
 else
-  # Use whatever Corepack ships with Node 22; you can pin later if desired.
   corepack prepare pnpm@latest --activate || true
 fi
 
-# Sanity
+# Traceability
 node -v
 npm -v
-pnpm -v || true  # present if corepack activated it
-
-echo "[node] Installed Node.js $(node -v) and npm $(npm -v)"
+pnpm -v || true
