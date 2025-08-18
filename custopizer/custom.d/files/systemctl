@@ -1,0 +1,15 @@
+#!/bin/sh
+# Minimal, quiet systemctl shim for chroot/customizer stages.
+# Logs the call (stderr) and returns success so package postinst scripts don't fail.
+
+case "$1" in
+  enable|disable|daemon-reload|preset|start|stop|restart|reload|is-enabled|is-active)
+    # Don’t actually alter runtime during image build
+    echo "[shim] systemctl $@" >&2
+    exit 0
+    ;;
+  *)
+    echo "[shim] systemctl $@" >&2
+    exit 0
+    ;;
+esac
