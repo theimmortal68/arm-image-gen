@@ -1,22 +1,40 @@
 # bconf/rpi64/firmware.yaml
 # Enable the Raspberry Pi archive during mmdebstrap *setup* so it is present
-# before any package resolution. Add APT pins for userland/camera and kernel,
-# and drop safe boot defaults.
+# before any package resolution. Install the official archive keyring .deb
+# into the TARGET rootfs, add APT pins for userland/camera and kernel, and
+# write safe boot defaults.
+---
 mmdebstrap:
   setup-hooks:
     - |
       set -eu
-      install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d" "$1/etc/apt/preferences.d" "$1/boot/firmware"
+      export DEBIAN_FRONTEND=noninteractive
+      install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d" "$1/etc/apt/preferences.d" "$1/boot/firmware" "$1/tmp"
 
-      # Raspberry Pi archive keyring
-      curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key \
-        | gpg --dearmor > "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
-      chmod 0644 "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
+      # --------------------------------------------------------------------
+      # Install the official Raspberry Pi archive keyring via .deb (in target)
+      # --------------------------------------------------------------------
+      BASE="https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring"
+      # Find latest keyring .deb from directory listing, download into target, dpkg -i inside chroot
+      DEB="$(curl -fsSL "${BASE}/" \
+            | sed -n 's@.*href="\([^"]*raspberrypi-archive-keyring_[^"]*_all\.deb\)".*@\1@p' \
+            | sort -V | tail -1)"
+      if [ -z "${DEB:-}" ]; then
+        echo "ERROR: could not determine raspberrypi-archive-keyring .deb" >&2
+        exit 1
+      fi
+      curl -fsSL -o "$1/tmp/${DEB##*/}" "${BASE}/${DEB##*/}"
+      chroot "$1" dpkg -i "/tmp/${DEB##*/}"
+      rm -f "$1/tmp/${DEB##*/}"
 
-      # Raspberry Pi archive (Bookworm)
+      # Raspberry Pi archive (Bookworm) — use HTTPS and Signed-By
       cat >"$1/etc/apt/sources.list.d/raspi.list" <<'EOF'
-      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian/ bookworm main
+      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian bookworm main
       EOF
+
+      # --------------------------------------------------------------------
+      # APT pins
+      # --------------------------------------------------------------------
 
       # Prefer Pi-origin userland & camera stack (lets rpicam-apps pull correct libcamera*)
       cat >"$1/etc/apt/preferences.d/50-raspi-userland.pref" <<'EOF'
@@ -41,7 +59,9 @@ mmdebstrap:
       Pin-Priority: -1
       EOF
 
-      # Provide safe boot defaults (Pi packages also manage /boot content)
+      # --------------------------------------------------------------------
+      # Boot defaults (Pi packages also manage /boot content)
+      # --------------------------------------------------------------------
       cat >"$1/boot/firmware/config.txt" <<'EOF'
       arm_64bit=1
       enable_uart=1
