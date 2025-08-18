@@ -4,6 +4,7 @@ mmdebstrap:
     - |
       set -eu
       install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d"
+
       # Install Armbian repo key into a dedicated keyring
       curl -fsSL https://apt.armbian.com/armbian.key \
         | gpg --dearmor -o "$1/usr/share/keyrings/armbian.gpg"
@@ -14,20 +15,30 @@ mmdebstrap:
       deb [signed-by=/usr/share/keyrings/armbian.gpg] http://apt.armbian.com bookworm main bookworm-utils bookworm-desktop
       EOF
 
-      # Optional: pull firmware/meta from Armbian
-      chroot "$1" bash -euo pipefail <<'EOSH'
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update
-      apt-get install -y armbian-firmware || true
-      EOSH
+      # Prefer Debian for most packages; allow Armbian when explicitly needed.
+      # (Keeps core libs from drifting while still letting us consume Armbian extras.)
+      install -d "$1/etc/apt/preferences.d"
+      cat >"$1/etc/apt/preferences.d/90-origins.pref" <<'EOF'
+      Package: *
+      Pin: release o=Debian
+      Pin-Priority: 700
 
-      chroot "$1" bash -euo pipefail <<'EOSH'
+      Package: *
+      Pin: origin "apt.armbian.com"
+      Pin-Priority: 600
+      EOF
+
       set -eux
       export DEBIAN_FRONTEND=noninteractive
       CS_VER="${CAMERA_STREAMER_VERSION:-0.2.8}"
       ARCH="$(dpkg --print-architecture)"
       CODENAME="$(. /etc/os-release; echo "${VERSION_CODENAME}")"
       BASE="https://github.com/ayufan/camera-streamer/releases/download/v${CS_VER}"
+
+      # Make sure apt metadata is present for any .deb dependencies we pull in.
+      apt-get update
+
+      # Try generic first, then SoC-specific
       for PKG in \
         "camera-streamer-generic_${CS_VER}.${CODENAME}_${ARCH}.deb" \
         "camera-streamer-rk3588_${CS_VER}.${CODENAME}_${ARCH}.deb" \

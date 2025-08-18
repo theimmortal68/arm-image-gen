@@ -4,10 +4,8 @@ mmdebstrap:
   packages:
     - libraspberrypi0
     - libraspberrypi-bin
-    - libcamera0
-    - libcamera-tool
-    - libcamera-dev
-    - rpicam-apps   # uncomment if you ship the newer camera apps
+    - libcamera-tools
+    - rpicam-apps
     - raspinfo
     - raspi-config
-    - raspberry-sys-mods
+    - raspberrypi-sys-mods

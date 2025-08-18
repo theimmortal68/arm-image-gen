@@ -1,50 +1,47 @@
----
+# bconf/rpi64/firmware.yaml
+# Enable the Raspberry Pi archive during mmdebstrap *setup* so it is present
+# before any package resolution. Add APT pins for userland/camera and kernel,
+# and drop safe boot defaults.
 mmdebstrap:
-  # Add Raspberry Pi archive, pin kernel/bootloader high, install firmware/kernel/EEPROM
-  customize-hooks:
+  setup-hooks:
     - |
       set -eu
-      export DEBIAN_FRONTEND=noninteractive
-
-      printf "rpi64\n" > "$1/etc/device-id"
       install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d" "$1/etc/apt/preferences.d" "$1/boot/firmware"
 
-      # Raspberry Pi repo + key (bookworm)
-      curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key       | gpg --dearmor -o "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
+      # Raspberry Pi archive keyring
+      curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key \
+        | gpg --dearmor > "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
       chmod 0644 "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
 
+      # Raspberry Pi archive (Bookworm)
       cat >"$1/etc/apt/sources.list.d/raspi.list" <<'EOF'
-      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] http://archive.raspberrypi.com/debian bookworm main contrib non-free rpi
+      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian/ bookworm main
       EOF
 
-      # Pin Raspberry Pi kernel/bootloader/EEPROM HIGH so Debian can't override
-      cat >"$1/etc/apt/preferences.d/99-raspberrypi-kernel.pref" <<'EOF'
-      Package: raspberrypi-kernel raspberrypi-bootloader rpi-eeprom
-      Pin: origin archive.raspberrypi.com
+      # Prefer Pi-origin userland & camera stack (lets rpicam-apps pull correct libcamera*)
+      cat >"$1/etc/apt/preferences.d/50-raspi-userland.pref" <<'EOF'
+      Explanation: Prefer Raspberry Pi userland & camera stack
+      Package: libraspberrypi* rpicam* raspi* raspberrypi-* libcamera* gstreamer1.0-libcamera*
+      Pin: origin "archive.raspberrypi.com"
       Pin-Priority: 1001
       EOF
 
-      # Avoid Debian's generic kernel replacing RPi's packages accidentally
+      # Pin Raspberry Pi kernel/bootloader/EEPROM so Debian can't override
+      cat >"$1/etc/apt/preferences.d/60-raspi-kernel.pref" <<'EOF'
+      Explanation: Prefer Raspberry Pi kernel/bootloader/EEPROM from Raspberry Pi archive
+      Package: raspberrypi-kernel raspberrypi-bootloader rpi-eeprom
+      Pin: origin "archive.raspberrypi.com"
+      Pin-Priority: 1001
+      EOF
+
+      # Avoid Debian's generic kernel replacing Raspberry Pi's packages accidentally
       cat >"$1/etc/apt/preferences.d/10-avoid-debian-kernel.pref" <<'EOF'
       Package: linux-image-arm64
       Pin: release o=Debian
       Pin-Priority: -1
       EOF
 
-      # Pin RPi-origin libcamera stack to avoid libcamera-ipa/libcamera0 mismatches
-      cat >/etc/apt/preferences.d/99-raspi-camera.pref <<'EOF'
-      Package: libcamera* libcaml* libepoxy* libdrm* libv4l-0* libv4l2rds*
-      Pin: origin "archive.raspberrypi.org"
-      Pin-Priority: 1001
-      EOF
-  
-      chroot "$1" bash -euo pipefail <<'EOSH'
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update
-      apt-get install -y raspberrypi-kernel raspberrypi-bootloader rpi-eeprom
-      EOSH
-
-      # Provide safe defaults for boot (Pi packages also manage /boot content)
+      # Provide safe boot defaults (Pi packages also manage /boot content)
       cat >"$1/boot/firmware/config.txt" <<'EOF'
       arm_64bit=1
       enable_uart=1
@@ -55,3 +52,9 @@ mmdebstrap:
       cat >"$1/boot/firmware/cmdline.txt" <<'EOF'
       console=serial0,115200 console=tty1 root=LABEL=rootfs rootfstype=ext4 fsck.repair=yes rootwait
       EOF
+
+  # Install these from the Pi archive (repo is active thanks to setup-hooks above)
+  packages:
+    - raspberrypi-kernel
+    - raspberrypi-bootloader
+    - rpi-eeprom
