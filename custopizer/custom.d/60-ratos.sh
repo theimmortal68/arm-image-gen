@@ -18,7 +18,7 @@ HOME_DIR="$(getent passwd "$KS_USER" | cut -d: -f6 || true)"
 # --- Optional: RatOS theme (matches your prior flow) ---
 # No idempotence checks by request: cloning into an existing dir will fail (desired).
 RATOS_THEME_REPO="https://github.com/Rat-OS/RatOS-theme.git"
-RATOS_THEME_REF="v2.1"       # adjust as needed
+RATOS_THEME_REF="v2.1.x"       # adjust as needed
 git_sync "${RATOS_THEME_REPO}" "${HOME_DIR}/RatOS-theme" "${RATOS_THEME_REF}" 1
 
 # Register theme with Moonraker Update Manager (user-scope include).
