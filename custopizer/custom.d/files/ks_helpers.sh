@@ -177,3 +177,34 @@ pi ALL=(ALL) NOPASSWD:ALL
 EOF
 }
 # End of ks_helpers.sh
+
+# --- systemctl shim lifecycle (chroot-only) ---
+
+ks_systemctl_shim_install() {
+  set -euxo pipefail
+  # Ensure /usr merge semantics cover /bin/systemctl as well.
+  install -m 0755 /files/systemctl /usr/bin/systemctl
+
+  # Optional: belt-and-suspenders to stop invoke-rc.d from starting services.
+  # Comment out if you prefer strictly the shim approach.
+  cat >/usr/sbin/policy-rc.d <<'EOF'
+#!/bin/sh
+# Prevent service starts in chroot; exit code 101 makes invoke-rc.d a no-op.
+exit 101
+EOF
+  chmod +x /usr/sbin/policy-rc.d
+}
+
+ks_systemctl_shim_remove() {
+  set -euxo pipefail
+  # Remove shim and let the real systemctl (from systemd package) take its place at runtime.
+  # If systemd isn’t installed yet in the chroot, this will simply leave no systemctl;
+  # that’s fine, because enablement happens later on first boot.
+  if [ -f /usr/bin/systemctl ]; then
+    # Remove only if it's our shim (best-effort; we keep it simple per your rules)
+    rm -f /usr/bin/systemctl
+  fi
+
+  # Clean up policy-rc.d if we created it
+  rm -f /usr/sbin/policy-rc.d || true
+}
