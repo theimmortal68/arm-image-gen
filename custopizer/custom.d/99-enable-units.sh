@@ -9,6 +9,9 @@ source /common.sh; install_cleanup_trap
 
 section "Enabling requested systemd units"
 
+# Remove systemctl shim FIRST so enables create real symlinks in the image.
+ks_systemctl_shim_remove
+
 FILES_LIST="/files/etc/ks-enable-units.txt"
 ETC_LIST="/etc/ks-enable-units.txt"
 
