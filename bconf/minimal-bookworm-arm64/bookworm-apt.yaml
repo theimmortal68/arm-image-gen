@@ -1,4 +1,4 @@
-⁹---
+---
 name: bookworm-apt
 mmdebstrap:
   architectures:
