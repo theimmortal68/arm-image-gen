@@ -113,6 +113,7 @@ jobs:
               https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src
           }
           sudo install -D -m 0755 mmdebstrap-src/mmdebstrap /usr/local/bin/mmdebstrap
+          sudo install -D -m 0755 mmdebstrap-src/mmtarfilter /usr/local/bin/mmtarfilter
 
       - name: Install bdebstrap (runner local user)
         run: |
