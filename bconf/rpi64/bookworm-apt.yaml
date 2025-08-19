@@ -1,6 +1,5 @@
 ---
 name: rpi-bookworm-apt
----
 mmdebstrap:
   # Add Raspberry Pi archive, pin kernel/bootloader high, install firmware/kernel/EEPROM
   customize-hooks:
