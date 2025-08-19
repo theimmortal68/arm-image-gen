@@ -1,40 +1,30 @@
 ---
 name: rpi-bookworm-apt
+---
 mmdebstrap:
-  setup-hook: |
-    set -eu
-    install -d "$1/usr/share/keyrings"
-    curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key \
-      | gpg --dearmor > "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
-    chmod 0644 "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
-  mirrors:
-    - deb [arch=arm64 signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian bookworm main
-  # Install the keyring package so the Signed-By source works at runtime
-  packages:
-    - raspberrypi-archive-keyring
-
+  # Add Raspberry Pi archive, pin kernel/bootloader high, install firmware/kernel/EEPROM
   customize-hooks:
     - |
       set -eu
-      TARGET="$1"
-      install -d "$TARGET/etc/apt/sources.list.d" "$TARGET/etc/apt/preferences.d"
+      export DEBIAN_FRONTEND=noninteractive
 
-      # Permanent RPi source using Signed-By (runtime-safe)
-      cat >"$TARGET/etc/apt/sources.list.d/raspberrypi.list" <<'EOF'
-      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian bookworm main
+      printf "rpi64\n" > "$1/etc/device-id"
+      install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d" "$1/etc/apt/preferences.d" "$1/boot/firmware"
+
+      # Raspberry Pi repo + key (bookworm)
+      curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key       | gpg --dearmor -o "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
+      chmod 0644 "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
+
+      cat >"$1/etc/apt/sources.list.d/raspi.list" <<'EOF'
+      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] http://archive.raspberrypi.com/debian bookworm main
       EOF
-
-      # Remove the temporary trusted mirror line from the main sources.list
-      if [ -f "$TARGET/etc/apt/sources.list" ]; then
-        sed -i -E '/^deb .*archive\.raspberrypi\.com\/debian /d' "$TARGET/etc/apt/sources.list" || true
-      fi
 
       # --------------------------------------------------------------------
       # APT pins
       # --------------------------------------------------------------------
 
       # Prefer Pi-origin userland & camera stack (lets rpicam-apps pull correct libcamera*)
-      cat >"$TARGET/etc/apt/preferences.d/50-raspi-userland.pref" <<'EOF'
+      cat >"$1/etc/apt/preferences.d/50-raspi-userland.pref" <<'EOF'
       Explanation: Prefer Raspberry Pi userland & camera stack
       Package: libraspberrypi* rpicam* raspi* raspberrypi-* libcamera* gstreamer1.0-libcamera*
       Pin: origin "archive.raspberrypi.com"
@@ -42,7 +32,7 @@ mmdebstrap:
       EOF
 
       # Pin Raspberry Pi kernel/bootloader/EEPROM so Debian can't override
-      cat >"$TARGET/etc/apt/preferences.d/60-raspi-kernel.pref" <<'EOF'
+      cat >"$1/etc/apt/preferences.d/60-raspi-kernel.pref" <<'EOF'
       Explanation: Prefer Raspberry Pi kernel/bootloader/EEPROM from Raspberry Pi archive
       Package: raspberrypi-kernel raspberrypi-bootloader rpi-eeprom
       Pin: origin "archive.raspberrypi.com"
@@ -50,7 +40,7 @@ mmdebstrap:
       EOF
 
       # Avoid Debian's generic kernel replacing Raspberry Pi's packages accidentally
-      cat >"$TARGET/etc/apt/preferences.d/10-avoid-debian-kernel.pref" <<'EOF'
+      cat >"$1/etc/apt/preferences.d/10-avoid-debian-kernel.pref" <<'EOF'
       Package: linux-image-arm64
       Pin: release o=Debian
       Pin-Priority: -1
