@@ -1,7 +1,32 @@
 ---
 name: rpi-bookworm-apt
 mmdebstrap:
-  # Add Raspberry Pi archive, pin kernel/bootloader high, install firmware/kernel/EEPROM
+  # …your other mmdebstrap settings…
+  essential-hooks:
+    - |
+      set -eu
+      TARGET="$1"
+      install -d \
+        "$TARGET/usr/share/keyrings" \
+        "$TARGET/etc/apt/sources.list.d" \
+        "$TARGET/etc/apt/preferences.d"
+
+      # Use ONE host consistently (.com or .org)
+      RPI_HOST="archive.raspberrypi.com"
+      # RPI_HOST="archive.raspberrypi.org"
+
+      # Import Raspberry Pi APT key
+      curl -fsSL "https://${RPI_HOST}/debian/raspberrypi.gpg.key" \
+        | gpg --dearmor > "$TARGET/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
+      chmod 0644 "$TARGET/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
+
+      # Add Raspberry Pi repo (Bookworm)
+      cat >"$TARGET/etc/apt/sources.list.d/raspi.list" <<EOF
+      deb [arch=arm64 signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://${RPI_HOST}/debian bookworm main
+      EOF
+      
+      # Make the new repo visible for the next stage
+      chroot "$TARGET" apt-get update
   customize-hooks:
     - |
       set -eu
@@ -9,14 +34,6 @@ mmdebstrap:
 
       printf "rpi64\n" > "$1/etc/device-id"
       install -d "$1/usr/share/keyrings" "$1/etc/apt/sources.list.d" "$1/etc/apt/preferences.d" "$1/boot/firmware"
-
-      # Raspberry Pi repo + key (bookworm)
-      curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key       | gpg --dearmor -o "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
-      chmod 0644 "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
-
-      cat >"$1/etc/apt/sources.list.d/raspi.list" <<'EOF'
-      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] http://archive.raspberrypi.com/debian bookworm main
-      EOF
 
       # --------------------------------------------------------------------
       # APT pins
@@ -33,7 +50,7 @@ mmdebstrap:
       # Pin Raspberry Pi kernel/bootloader/EEPROM so Debian can't override
       cat >"$1/etc/apt/preferences.d/60-raspi-kernel.pref" <<'EOF'
       Explanation: Prefer Raspberry Pi kernel/bootloader/EEPROM from Raspberry Pi archive
-      Package: raspberrypi-kernel raspberrypi-bootloader rpi-eeprom
+      Package: linux-image-rpi-2712 rpi-eeprom
       Pin: origin "archive.raspberrypi.com"
       Pin-Priority: 1001
       EOF
