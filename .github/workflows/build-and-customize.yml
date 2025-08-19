@@ -91,45 +91,17 @@ jobs:
             qemu-user-static binfmt-support qemu-utils kpartx dosfstools \
             parted e2fsprogs rsync xz-utils ca-certificates curl git \
             arch-test pandoc jq unzip util-linux udev mount kmod file \
-            perl python3-pip debian-archive-keyring gnupg  pigz \
-            p7zip-full parted bmap-tools debootstrap
-
-#      - name: Enable binfmts (arm/arm64)
-#        run: |
-#          set -eux pipefail
-#          sudo update-binfmts --enable qemu-aarch64 || true
-#          sudo update-binfmts --enable qemu-arm || true
-#          arch-test arm64
-#          qemu-aarch64-static --version
-
-      - name: Install mmdebstrap (pinned)
-        run: |
-          set -eux pipefail
-          rm -rf mmdebstrap-src
-          git clone --depth=1 --branch "${MM_TAG}" \
-            https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src || {
-            echo "Tag ${MM_TAG} missing without 'v' prefix, retrying…"
-            git clone --depth=1 --branch "v${MM_TAG}" \
-              https://gitlab.mister-muffin.de/josch/mmdebstrap.git mmdebstrap-src
-          }
-          sudo install -D -m 0755 mmdebstrap-src/mmdebstrap /usr/local/bin/mmdebstrap
-          sudo install -D -m 0755 mmdebstrap-src/mmtarfilter /usr/local/bin/mmtarfilter
-
-      - name: Install bdebstrap (runner local user)
-        run: |
-          set -eux pipefail
-          python3 -m pip install --user --upgrade pip wheel
-          python3 -m pip install --user "git+https://github.com/bdrung/bdebstrap@${BDEB_REF}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+            perl python3-pip debian-archive-keyring gnupg pigz zstd \
+            p7zip-full parted bmap-tools debootstrap coreutils zip grep \
+            zip grep rsync curl genimage mtools mmdebstrap bdebstrap \
+            podman crudini pv uidmap python-is-python3 dbus-user-session \
+            btrfs-progs dctrl-tools uuid-runtime fdisk
 
      # (Optional) QEMU/Buildx if you containerize parts of the build
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
-          platforms: arm,arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+          platforms: arm64
 
       - name: Show selected device
         run: echo "DEVICE=${DEVICE}"
