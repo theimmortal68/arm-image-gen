@@ -1,4 +1,5 @@
 ---
+name: base-packages-armbian
 mmdebstrap:
   suite: bookworm
   components:
@@ -10,32 +11,6 @@ mmdebstrap:
     - arm64
   variant: apt
   format: directory
-
-  packages:
-    - ca-certificates
-    - curl
-    - wget
-    - git
-    - unzip
-    - rsync
-    - jq
-    - crudini
-    - python3
-    - python3-venv
-    - python3-dev
-    - python3-pip
-    - build-essential
-    - gcc
-    - g++
-    - make
-    - pkg-config
-    - libffi-dev
-    - libusb-1.0-0-dev
-    - libncurses-dev
-    - locales
-    - tzdata
-    - netbase
-    - arch-test   # optional: quiets foreign-arch checks inside chroot
 
   setup-hooks:
     - |

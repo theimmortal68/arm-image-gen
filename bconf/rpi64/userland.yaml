@@ -1,4 +1,5 @@
 ---
+name: rpi-firmware
 mmdebstrap:
   # Install Raspberry Pi userland & camera utilities AFTER repo is added by firmware.yaml
   packages:
@@ -9,3 +10,8 @@ mmdebstrap:
     - raspinfo
     - raspi-config
     - raspberrypi-sys-mods
+    - rpi-eeprom
+    - raspi-utils
+    - raspi-utils-core
+    - raspi-utils-dt
+    - flashrom

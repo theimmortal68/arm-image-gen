@@ -37,9 +37,10 @@ for su in /bin/su /usr/bin/su; do
   chmod 4755 "$su" || true
 done
 
-section "Fixing DNS/resolv.conf for chroot"
-# Replace stub resolv.conf with host's for the duration of the build
-if [ -f /etc/resolv.conf ]; then
-  cp -f /etc/resolv.conf /etc/resolv.conf.custopizer.bak || true
-fi
-printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" | wr_root 0644 /etc/resolv.conf
+#### THIS SHOULD BE DONE BY NETWORKING.YAML IN BUILD STAGE ####
+# section "Fixing DNS/resolv.conf for chroot"
+# # Replace stub resolv.conf with host's for the duration of the build
+# if [ -f /etc/resolv.conf ]; then
+#   cp -f /etc/resolv.conf /etc/resolv.conf.custopizer.bak || true
+# fi
+# printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" | wr_root 0644 /etc/resolv.conf

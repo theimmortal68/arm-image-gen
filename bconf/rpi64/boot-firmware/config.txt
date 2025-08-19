@@ -1,0 +1,53 @@
+# Raspberry Pi 3/4/5 — camera-friendly config with I2C/SPI/UART enabled
+# For more options: http://rptl.io/configtxt
+# NOTE: Uses modern KMS + libcamera (no legacy "start_x" needed)
+
+##########
+# Core display & camera
+##########
+camera_auto_detect=1
+display_auto_detect=1
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+disable_fw_kms_setup=1
+disable_overscan=1
+auto_initramfs=1
+
+##########
+# Interfaces
+##########
+dtparam=i2c_arm=on
+dtparam=spi=on
+enable_uart=1
+# If you also need I2S (audio HATs), uncomment:
+# dtparam=i2s=on
+
+##########
+# Audio (onboard HDMI/analog)
+##########
+dtparam=audio=on
+
+##########
+# UART / Bluetooth notes (Pi 3/4/5)
+# - Default keeps Bluetooth on its reliable PL011 in most models.
+# - If you need the full PL011 on GPIO14/15 for your own UART device, pick ONE of:
+#   1) Disable Bluetooth entirely (simplest, frees PL011):
+#      dtoverlay=disable-bt
+#   2) Keep Bluetooth but move it to mini-UART (PL011 goes to GPIO14/15):
+#      dtoverlay=miniuart-bt
+# Mini-UART has a lower feature set; for stability under CPU frequency changes,
+# the miniuart-bt overlay handles clocking, so no extra core_freq tweaks needed.
+##########
+
+##########
+# Board-specific tweaks
+##########
+[pi4]
+# Light boost where supported; harmless if ignored by firmware
+arm_boost=1
+
+[pi3]
+# No special settings required beyond the common section
+
+[pi5]
+# No extra settings required; KMS + camera auto-detect handle Pi 5 fine

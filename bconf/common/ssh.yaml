@@ -1,5 +1,8 @@
 ---
+name: ssh.yaml
 mmdebstrap:
+  packages:
+    - openssh-server
   customize-hooks:
     - |
       set -e
@@ -9,3 +12,4 @@ mmdebstrap:
       PasswordAuthentication no
       PermitRootLogin no
       EOF
+    - $BDEBSTRAP_HOOKS/enable-units "$1" ssh

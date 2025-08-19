@@ -1,0 +1,51 @@
+---
+name: bookworm-apt
+mmdebstrap:
+  architectures:
+    - arm64
+  mode: auto
+  variant: apt   # valid: "essential + apt" per mmdebstrap(1)
+  suite: bookworm
+  mirrors:
+    - deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+    - deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+    - deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+
+  essential-hooks:
+    - |
+      set -eu
+      TARGET="$1"
+      export DEBIAN_FRONTEND=noninteractive
+
+      TZ_AREA="${TZ_AREA:-America}"
+      TZ_CITY="${TZ_CITY:-New_York}"
+      LOCALE="${LOCALE:-en_US.UTF-8}"
+      KBD_VARIANT="${KBD_VARIANT:-}"
+      KBD_KEYMAP="${KBD_KEYMAP:-us}"
+
+      # Seed debconf non-interactively inside the target rootfs
+      echo "tzdata tzdata/Areas select $TZ_AREA"                 | chroot "$TARGET" debconf-set-selections
+      echo "tzdata tzdata/Zones/$TZ_AREA select $TZ_CITY"        | chroot "$TARGET" debconf-set-selections
+      echo "locales locales/locales_to_be_generated multiselect ${LOCALE} UTF-8" | chroot "$TARGET" debconf-set-selections
+      echo "locales locales/default_environment_locale select $LOCALE"           | chroot "$TARGET" debconf-set-selections
+      echo "keyboard-configuration keyboard-configuration/variant select $KBD_VARIANT" | chroot "$TARGET" debconf-set-selections
+      echo "keyboard-configuration keyboard-configuration/xkb-keymap select $KBD_KEYMAP" | chroot "$TARGET" debconf-set-selections
+
+  aptopts:
+    - APT::Install-Suggests "false"
+    - APT::Install-Recommends "false"
+
+  dpkgopts:
+    # Trim bulky docs/locales; re-include minimal essentials
+    - path-exclude=/usr/share/doc/*
+    - path-exclude=/usr/share/info/*
+    - path-exclude=/usr/share/omf/*
+    - path-exclude=/usr/share/help/*
+    - path-exclude=/usr/share/gnome/help/*
+    - path-exclude=/usr/share/lintian/*
+    - path-exclude=/usr/share/locale/*
+    - path-exclude=/usr/share/man/*
+    - path-include=/usr/share/doc/*/copyright
+    - path-include=/usr/share/doc/*/changelog.Debian.*
+    - path-include=/usr/share/locale/locale.alias
+    - path-include=/usr/share/man/man[1-9]/*

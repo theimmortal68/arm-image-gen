@@ -1,8 +1,8 @@
 ---
+name: networking
 mmdebstrap:
   packages:
     - network-manager
-    - openssh-server
   customize-hooks:
     - |
       set -eu
@@ -16,6 +16,18 @@ mmdebstrap:
       options timeout:2 attempts:3
       EOF
       chmod 0644 "$1/etc/resolv.conf"
+
+      cat >"$1/etc/hosts" <<'EOF'
+      ::1     ip6-localhost ip6-loopback
+      fe00::0 ip6-localnet
+      ff00::0 ip6-mcastprefix
+      ff02::1 ip6-allnodes
+      ff02::2 ip6-allrouters
+
+      127.0.0.1   localhost
+      127.0.1.1   $IGconf_device_hostname
+      EOF
+      chmod 0644 "$/etc/hosts"
 
       # Helpful apt robustness (safe to repeat even if you already add this elsewhere)
       install -d "$1/etc/apt/apt.conf.d"
