@@ -1,54 +1,15 @@
 ---
-name: rpi-bookworm-apt
+name: debian-bookworm-rpi
 mmdebstrap:
-
-  # Bootstrap-time access to the Raspberry Pi archive (trusted only during build)
   mirrors:
-    - deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian bookworm main
-
-  # Install the keyring package so the Signed-By source works at runtime
+    - deb http://archive.raspberrypi.com/debian bookworm main
   packages:
     - raspberrypi-archive-keyring
-
   customize-hooks:
-    - |
-      set -eu
-      TARGET="$1"
-      install -d "$TARGET/etc/apt/sources.list.d" "$TARGET/etc/apt/preferences.d"
-
-      # Permanent RPi source using Signed-By (runtime-safe)
-      cat >"$TARGET/etc/apt/sources.list.d/raspberrypi.list" <<'EOF'
-      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian bookworm main
+    - test -f $1/usr/share/keyrings/raspberrypi-archive-keyring.gpg || false
+    - mkdir -p $1/etc/apt/sources.list.d
+    - |-
+      cat <<- EOF > $1/etc/apt/sources.list.d/raspberrypi.list
+      deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] http://archive.raspberrypi.com/debian bookworm main
       EOF
-
-      # Remove the temporary trusted mirror line from the main sources.list
-      if [ -f "$TARGET/etc/apt/sources.list" ]; then
-        sed -i -E '/^deb .*archive\.raspberrypi\.com\/debian /d' "$TARGET/etc/apt/sources.list" || true
-      fi
-
-      # --------------------------------------------------------------------
-      # APT pins
-      # --------------------------------------------------------------------
-
-      # Prefer Pi-origin userland & camera stack (lets rpicam-apps pull correct libcamera*)
-      cat >"$TARGET/etc/apt/preferences.d/50-raspi-userland.pref" <<'EOF'
-      Explanation: Prefer Raspberry Pi userland & camera stack
-      Package: libraspberrypi* rpicam* raspi* raspberrypi-* libcamera* gstreamer1.0-libcamera*
-      Pin: origin "archive.raspberrypi.com"
-      Pin-Priority: 1001
-      EOF
-
-      # Pin Raspberry Pi kernel/bootloader/EEPROM so Debian can't override
-      cat >"$TARGET/etc/apt/preferences.d/60-raspi-kernel.pref" <<'EOF'
-      Explanation: Prefer Raspberry Pi kernel/bootloader/EEPROM from Raspberry Pi archive
-      Package: raspberrypi-kernel raspberrypi-bootloader rpi-eeprom
-      Pin: origin "archive.raspberrypi.com"
-      Pin-Priority: 1001
-      EOF
-
-      # Avoid Debian's generic kernel replacing Raspberry Pi's packages accidentally
-      cat >"$TARGET/etc/apt/preferences.d/10-avoid-debian-kernel.pref" <<'EOF'
-      Package: linux-image-arm64
-      Pin: release o=Debian
-      Pin-Priority: -1
-      EOF
+    - sed -i '/archive\.raspberrypi\.com/d' $1/etc/apt/sources.list
