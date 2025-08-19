@@ -2,13 +2,14 @@
 layers:
   - bconf/test.yaml
   - bconf/test2.yaml
+  - bconf/test3.yaml
 #  - bconf/minimal-bookworm-arm64/bookworm-apt.yaml
-  - bconf/common/base-packages-all.yaml
+ # - bconf/common/base-packages-all.yaml
 #  - bconf/rpi64/bookworm-apt.yaml
-  - bconf/rpi64/userland.yaml
-  - bconf/rpi64/firmware.yaml
-  - bconf/rpi64/kernel.yaml
-  - bconf/common/base-packages-debian.yaml
-  - bconf/common/networking.yaml
-  - bconf/common/ssh.yaml  
-  - bconf/rpi64/fake-hwclock.yaml
+#  - bconf/rpi64/userland.yaml
+#  - bconf/rpi64/firmware.yaml
+#  - bconf/rpi64/kernel.yaml
+#  - bconf/common/base-packages-debian.yaml
+#  - bconf/common/networking.yaml
+#  - bconf/common/ssh.yaml  
+#  - bconf/rpi64/fake-hwclock.yaml
