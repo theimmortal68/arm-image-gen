@@ -8,8 +8,7 @@ mmdebstrap:
       | gpg --dearmor > "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
     chmod 0644 "$1/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
   mirrors:
-    - deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian bookworm main
-
+    - deb [arch=arm64 signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian bookworm main
   # Install the keyring package so the Signed-By source works at runtime
   packages:
     - raspberrypi-archive-keyring
