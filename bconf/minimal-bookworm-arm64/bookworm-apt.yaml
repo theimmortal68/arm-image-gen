@@ -1,4 +1,4 @@
----
+⁹---
 name: bookworm-apt
 mmdebstrap:
   architectures:
@@ -7,10 +7,9 @@ mmdebstrap:
   variant: apt   # valid: "essential + apt" per mmdebstrap(1)
   suite: bookworm
   mirrors:
-    - deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
-    - deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
-    - deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
-
+    - deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+    - deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+    - deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
   essential-hooks:
     - |
       set -eu
