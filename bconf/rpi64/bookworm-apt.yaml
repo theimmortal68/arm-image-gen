@@ -1,9 +1,10 @@
 ---
 name: rpi-bookworm-apt
 mmdebstrap:
+
   # Bootstrap-time access to the Raspberry Pi archive (trusted only during build)
   mirrors:
-    - deb [trusted=yes] https://archive.raspberrypi.com/debian bookworm main
+    - deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian bookworm main
 
   # Install the keyring package so the Signed-By source works at runtime
   packages:
